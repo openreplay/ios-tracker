@@ -46,7 +46,7 @@ class NetworkManager: NSObject {
                     DebugUtils.error(">>>>>> Error in call \(request.url?.absoluteString ?? "") : \(error?.localizedDescription ?? "N/A")")
                     if (response as? HTTPURLResponse)?.statusCode == 401 {
                         self.token = nil
-                        ORTracker.shared.startSession(projectKey: ORTracker.shared.projectKey ?? "", options: ORTracker.shared.options)
+                        Openreplay.shared.startSession(projectKey: Openreplay.shared.projectKey ?? "", options: Openreplay.shared.options)
                     }
                     onError(error)
                     return

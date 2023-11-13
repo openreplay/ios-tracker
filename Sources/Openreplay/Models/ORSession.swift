@@ -5,7 +5,7 @@ class ORSessionRequest: NSObject {
     private static var params = [String: AnyHashable]()
 
     static func create( completion: @escaping (ORSessionResponse?) -> Void) {
-        guard let projectKey = ORTracker.shared.projectKey else { return print("Openreplay: no project key added") }
+        guard let projectKey = Openreplay.shared.projectKey else { return print("Openreplay: no project key added") }
 //         #warning("Can interfere with client usage")
         UIDevice.current.isBatteryMonitoringEnabled = true
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -37,8 +37,8 @@ class ORSessionRequest: NSObject {
         DebugUtils.log(">>>> device \(device) type \(device.safeDescription) mem \(UInt64(ProcessInfo.processInfo.physicalMemory / 1024))")
         params = [
             "projectKey": projectKey,
-            "trackerVersion": Bundle(for: ORTracker.shared.classForCoder).object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "N/A",
-            "revID": Bundle(for: ORTracker.shared.classForCoder).object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "N/A",
+            "trackerVersion": Bundle(for: Openreplay.shared.classForCoder).object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "N/A",
+            "revID": Bundle(for: Openreplay.shared.classForCoder).object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "N/A",
             "userUUID": ORUserDefaults.shared.userUUID,
             "userOSVersion": UIDevice.current.systemVersion,
             "userDevice": deviceModel,

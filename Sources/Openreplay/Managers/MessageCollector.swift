@@ -71,7 +71,7 @@ class MessageCollector: NSObject {
 
     private func flushImages() {
         let images = imagesWaiting.first
-        guard !imagesWaiting.isEmpty, let images = images, let projectKey = ORTracker.shared.projectKey else { return }
+        guard !imagesWaiting.isEmpty, let images = images, let projectKey = Openreplay.shared.projectKey else { return }
         imagesWaiting.remove(at: 0)
         
         imagesSending.append(images)

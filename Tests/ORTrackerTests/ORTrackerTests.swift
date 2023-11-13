@@ -1,5 +1,5 @@
 import XCTest
-@testable import ORTracker
+@testable import Openreplay
 
 final class ORTrackerTests: XCTestCase {
     func testExample() throws {

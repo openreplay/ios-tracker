@@ -7,8 +7,8 @@ public enum CheckState {
     case cantStart
 }
 
-open class ORTracker: NSObject {
-    @objc public static let shared = ORTracker()
+open class Openreplay: NSObject {
+    @objc public static let shared = Openreplay()
     public let userDefaults = UserDefaults(suiteName: "io.asayer.AsayerSDK-defaults")
     public var projectKey: String?
     public var trackerState = CheckState.unchecked
@@ -40,13 +40,13 @@ open class ORTracker: NSObject {
                 }
                 if options.wifiOnly {
                     self.trackerState = CheckState.cantStart
-                    print("Connected to Cellular and options.wifiOnly is true. ORTracker will not start.")
+                    print("Connected to Cellular and options.wifiOnly is true. Openreplay will not start.")
                 } else {
                     self.trackerState = CheckState.canStart
                 }
             } else {
                 self.trackerState = CheckState.cantStart
-                print("Not connected to either WiFi or Cellular. ORTracker will not start.")
+                print("Not connected to either WiFi or Cellular. Openreplay will not start.")
             }
         }
         

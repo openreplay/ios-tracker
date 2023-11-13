@@ -71,7 +71,7 @@ open class Analytics: NSObject {
 extension UIViewController {
 
     static func swizzleLifecycleMethods() {
-        DebugUtils.log(">>>>> ORTracker: swizzle UIViewController")
+        DebugUtils.log(">>>>> Openreplay: swizzle UIViewController")
 
         Self.swizzle(original: #selector(viewDidAppear(_:)), swizzled: #selector(swizzledViewDidAppear(_:)))
         Self.swizzle(original: #selector(viewDidDisappear(_:)), swizzled: #selector(swizzledViewDidDisappear(_:)))

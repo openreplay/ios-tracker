@@ -1,6 +1,6 @@
 Setting up tracker
 
-[Cocoapods home page](https://cocoapods.org/pods/ORTracker)
+[Cocoapods home page](https://cocoapods.org/pods/Openreplay)
 
 ## installation
 
@@ -9,20 +9,20 @@ Please make sure to use latest version.
 ### Cocoapods
 
 ```ruby
-  pod 'ORTracker', '~> 1.0.1'
+  pod 'ORTracker', '~> 1.0.2'
 ```
 
 ### Swift Package Manager
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/openreplay/iOS-SDK.git", from: "1.0.1"),
+    .package(url: "https://github.com/openreplay/ios-tracker.git", from: "1.0.2"),
 ]
 ```
 
 ```swift
 // AppDelegate.swift
-import ORTracker
+import Openreplay
 
 //... 
 
@@ -30,8 +30,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         
-        ORTracker.shared.serverURL = "https://your.instance.com/ingest"
-        ORTracker.shared.start(projectKey: "projectkey", options: .defaults)
+        Openreplay.shared.serverURL = "https://your.instance.com/ingest"
+        Openreplay.shared.start(projectKey: "projectkey", options: .defaults)
         
         // ...
         return true
@@ -53,7 +53,7 @@ Setting up touches listener
 
 ```swift
 // SceneDelegate.Swift
-import ORTracker
+import Openreplay
 
 // ...
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
@@ -72,14 +72,14 @@ import ORTracker
 Adding sensitive views (will be blurred in replay)
 
 ```swift
-import ORTracker
+import Openreplay
 
 // swiftUI
 Text("Very important sensitive text")
     .sensitive()
     
 // UIKit
-ORTracker.shared.addIgnoredView(view)
+Openreplay.shared.addIgnoredView(view)
 ```
 
 Adding tracked inputs
