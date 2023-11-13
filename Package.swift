@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "ORTracker",
+    name: "Openreplay",
     platforms: [
             .iOS(.v13)
         ],
