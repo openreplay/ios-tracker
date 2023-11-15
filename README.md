@@ -1,3 +1,5 @@
+[Full Documentation](https://docs.openreplay.com/en/ios-sdk/)
+
 Setting up tracker
 
 [Cocoapods home page](https://cocoapods.org/pods/OpenReplay)
