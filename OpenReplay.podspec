@@ -1,5 +1,5 @@
 Pod::Spec.new do |s|
-  s.name             = 'OpenReplay'
+  s.name             = 'Openreplay'
   s.version          = '1.0.5'
   s.summary          = 'IOS Library for Openreplay.'
   s.homepage         = 'https://github.com/openreplay/ios-tracker'

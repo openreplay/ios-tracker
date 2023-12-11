@@ -51,14 +51,14 @@ open class ScreenshotManager {
 
     public func addSanitizedElement(_ element: Sanitizable) {
         #if DEBUG
-        DebugUtils.log("called add")
+        DebugUtils.log("addSanitizedElement")
         #endif
         sanitizedElements.append(element)
     }
 
     public func removeSanitizedElement(_ element: Sanitizable) {
         #if DEBUG
-        DebugUtils.log("called remove")
+        DebugUtils.log("removeSanitizedElement")
         #endif
         sanitizedElements.removeAll { $0 as AnyObject === element as AnyObject }
     }
@@ -153,9 +153,7 @@ open class ScreenshotManager {
     //func onError() {
     //    takeScreenshot()
     //}
-
-    // MARK: - sending screenshots
-    func sendScreenshots() {
+    func saveScreenshotsLocally() {
         guard let sessionId = NetworkManager.shared.sessionId else {
             return
         }
@@ -210,6 +208,40 @@ open class ScreenshotManager {
                 #else
                 MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
                 #endif
+            } catch {
+                DebugUtils.log("Error writing tar.gz data: \(error)")
+            }
+        }
+        screenshots.removeAll()
+    }
+
+    // MARK: - sending screenshots
+    func sendScreenshots() {
+        guard let sessionId = NetworkManager.shared.sessionId else {
+            return
+        }
+        var archiveName = "\(sessionId)-\(String(format: "%06d", self.lastIndex)).tar.gz"
+        var combinedData = Data()
+        let images = screenshots
+        for (_, imageData) in screenshots.enumerated() {
+            combinedData.append(imageData)
+        }
+    
+        messagesQueue.addOperation {
+            var entries: [TarEntry] = []
+            for imageData in images {
+                let filename = "\(String(format: "%06d", self.lastIndex)).jpeg"
+                var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData)
+                tarEntry.info.permissions = Permissions(rawValue: 420)
+                tarEntry.info.creationTime = Date()
+                tarEntry.info.modificationTime = Date()
+                
+                entries.append(tarEntry)
+                self.lastIndex+=1
+            }
+            do {
+                let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
+                MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
             } catch {
                 DebugUtils.log("Error writing tar.gz data: \(error)")
             }
