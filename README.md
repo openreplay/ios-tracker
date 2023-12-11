@@ -11,14 +11,14 @@ Please make sure to use latest version. (check in tags)
 ### Cocoapods
 
 ```ruby
-  pod 'OpenReplay', '~> 1.0.6'
+  pod 'OpenReplay', '~> 1.0.7'
 ```
 
 ### Swift Package Manager
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/openreplay/ios-tracker.git", from: "1.0.6"),
+    .package(url: "https://github.com/openreplay/ios-tracker.git", from: "1.0.7"),
 ]
 ```
 

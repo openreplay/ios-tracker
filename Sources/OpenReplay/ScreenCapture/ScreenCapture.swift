@@ -220,7 +220,7 @@ open class ScreenshotManager {
         guard let sessionId = NetworkManager.shared.sessionId else {
             return
         }
-        var archiveName = "\(sessionId)-\(String(format: "%06d", self.lastIndex)).tar.gz"
+        let archiveName = "\(sessionId)-\(String(format: "%06d", self.lastIndex)).tar.gz"
         var combinedData = Data()
         let images = screenshots
         for (_, imageData) in screenshots.enumerated() {
