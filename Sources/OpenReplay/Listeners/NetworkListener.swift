@@ -79,17 +79,8 @@ open class NetworkListener: NSObject {
         let responseJSON = convertDictionaryToJSONString(dictionary: responseContent) ?? ""
 
         let status = httpResponse?.statusCode ?? 0
-        let message = ORIOSNetworkCall(
-            type: "request",
-            method: method,
-            URL: url,
-            request: requestJSON,
-            response: responseJSON,
-            status: UInt64(status),
-            duration: endTime - startTime
-        )
-        
-        MessageCollector.shared.sendMessage(message)
+        let dur = endTime - startTime
+        sendNetworkMessage(url: url, method: method, requestJSON: requestJSON, responseJSON: responseJSON, status: status, duration: dur)
     }
 
     private func sanitizeHeaders(headers: [String: String]?) -> [String: String]? {
@@ -123,6 +114,20 @@ func convertDictionaryToJSONString(dictionary: [String: Any?]) -> String? {
         return String(data: jsonData, encoding: .utf8)
     }
     return nil
+}
+
+public func sendNetworkMessage(url: String, method: String, requestJSON: String, responseJSON: String, status: Int, duration: UInt64) {
+    let message = ORIOSNetworkCall(
+        type: "request",
+        method: method,
+        URL: url,
+        request: requestJSON,
+        response: responseJSON,
+        status: UInt64(status),
+        duration: duration
+    )
+    
+    MessageCollector.shared.sendMessage(message)
 }
 
 func transformHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {

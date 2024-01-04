@@ -138,6 +138,10 @@ open class Openreplay: NSObject {
         let message = ORIOSUserAnonymousID(iD: userID)
         MessageCollector.shared.sendMessage(message)
     }
+    
+    @objc open func networkRequest(url: String, method: String, requestJSON: String, responseJSON: String, status: Int, duration: UInt64) {
+        sendNetworkMessage(url: url, method: method, requestJSON: requestJSON, responseJSON: responseJSON, status: status, duration: duration)
+    }
 }
 
 
