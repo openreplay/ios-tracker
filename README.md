@@ -11,14 +11,14 @@ Please make sure to use latest version. (check in tags)
 ### Cocoapods
 
 ```ruby
-  pod 'OpenReplay', '~> 1.0.8'
+  pod 'OpenReplay', '~> 1.0.9'
 ```
 
 ### Swift Package Manager
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/openreplay/ios-tracker.git", from: "1.0.8"),
+    .package(url: "https://github.com/openreplay/ios-tracker.git", from: "1.0.9"),
 ]
 ```
 
@@ -26,15 +26,15 @@ dependencies: [
 // AppDelegate.swift
 import OpenReplay
 
-//... 
+//...
 
 class AppDelegate: UIResponder, UIApplicationDelegate {
-    
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        
+
         OpenReplay.shared.serverURL = "https://your.instance.com/ingest"
         OpenReplay.shared.start(projectKey: "projectkey", options: .defaults)
-        
+
         // ...
         return true
     }
@@ -63,7 +63,7 @@ import OpenReplay
             .environmentObject(TodoStore())
 
         if let windowScene = scene as? UIWindowScene {
-            let window = TouchTrackingWindow(windowScene: windowScene) // <<<< here 
+            let window = TouchTrackingWindow(windowScene: windowScene) // <<<< here
             window.rootViewController = UIHostingController(rootView: contentView)
             self.window = window
             window.makeKeyAndVisible()
@@ -79,7 +79,7 @@ import OpenReplay
 // swiftUI
 Text("Very important sensitive text")
     .sensitive()
-    
+
 // UIKit
 OpenReplay.shared.addIgnoredView(view)
 ```

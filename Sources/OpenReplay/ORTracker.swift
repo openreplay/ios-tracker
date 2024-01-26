@@ -11,6 +11,8 @@ open class Openreplay: NSObject {
     @objc public static let shared = Openreplay()
     public let userDefaults = UserDefaults(suiteName: "io.asayer.AsayerSDK-defaults")
     public var projectKey: String?
+    public var pkgVersion = "1.0.9"
+    public var sessionStartTs: UInt64 = 0
     public var trackerState = CheckState.unchecked
     private var networkCheckTimer: Timer?
     public var serverURL: String {
@@ -65,6 +67,7 @@ open class Openreplay: NSObject {
         self.projectKey = projectKey
         ORSessionRequest.create() { sessionResponse in
             guard let sessionResponse = sessionResponse else { return print("Openreplay: no response from /start request") }
+            self.sessionStartTs = UInt64(Date().timeIntervalSince1970 * 1000)
             let captureSettings = getCaptureSettings(fps: sessionResponse.fps, quality: sessionResponse.quality)
             ScreenshotManager.shared.setSettings(settings: captureSettings)
             
@@ -83,7 +86,7 @@ open class Openreplay: NSObject {
             }
             
             if options.screen {
-                ScreenshotManager.shared.start()
+                ScreenshotManager.shared.start(self.sessionStartTs)
             }
             
             if options.analytics {

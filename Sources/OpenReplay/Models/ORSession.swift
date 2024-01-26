@@ -37,7 +37,7 @@ class ORSessionRequest: NSObject {
         DebugUtils.log(">>>> device \(device) type \(device.safeDescription) mem \(UInt64(ProcessInfo.processInfo.physicalMemory / 1024))")
         params = [
             "projectKey": projectKey,
-            "trackerVersion": Bundle(for: Openreplay.shared.classForCoder).object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "N/A",
+            "trackerVersion": Openreplay.shared.pkgVersion,
             "revID": Bundle(for: Openreplay.shared.classForCoder).object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "N/A",
             "userUUID": ORUserDefaults.shared.userUUID,
             "userOSVersion": UIDevice.current.systemVersion,

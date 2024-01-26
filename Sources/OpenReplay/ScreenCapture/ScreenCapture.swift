@@ -13,8 +13,9 @@ open class ScreenshotManager {
 
     private var sanitizedElements: [Sanitizable] = []
     private var observedInputs: [UITextField] = []
-    private var screenshots: [Data] = []
-    private var lastIndex = 0
+    private var screenshots: [(Data, UInt64)] = []
+    private var lastTs: UInt64 = 0
+    private var firstTs: UInt64 = 0
     // MARK: capture settings
     // should we blur out sensitive views, or place a solid box on top
     private var isBlurMode = true
@@ -26,7 +27,8 @@ open class ScreenshotManager {
     
     private init() { }
 
-    func start() {
+    func start(_ startTs: UInt64) {
+        firstTs = startTs
         startTakingScreenshots(every: settings.captureRate)
     }
     
@@ -37,7 +39,7 @@ open class ScreenshotManager {
     func stop() {
         timer?.invalidate()
         timer = nil
-        lastIndex = 0
+        lastTs = 0
         screenshots.removeAll()
     }
     
@@ -140,7 +142,7 @@ open class ScreenshotManager {
         // Get the resulting image
         if let image = UIGraphicsGetImageFromCurrentImageContext() {
             if let compressedData = image.jpegData(compressionQuality: self.settings.imgCompression) {
-                screenshots.append(compressedData)
+                screenshots.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
                 if screenshots.count >= 10 {
                     self.sendScreenshots()
                 }
@@ -159,7 +161,7 @@ open class ScreenshotManager {
         }
         let localFilePath = "/Users/nikitamelnikov/Desktop/session/"
         let desktopURL = URL(fileURLWithPath: localFilePath)
-        var archiveName = "\(sessionId)-\(String(format: "%06d", self.lastIndex)).tar.gz"
+        var archiveName = "\(sessionId)-\(self.lastTs).tar.gz"
         let archiveURL = desktopURL.appendingPathComponent(archiveName)
 
         // Ensure the directory exists
@@ -169,14 +171,14 @@ open class ScreenshotManager {
         }
         var combinedData = Data()
         let images = screenshots
-        for (index, imageData) in screenshots.enumerated() {
-            combinedData.append(imageData)
+        for (_, imageData) in screenshots.enumerated() {
+            combinedData.append(imageData.0)
             #if DEBUG
-            let filename = "\(lastIndex)_\(index).jpeg"
+            let filename = "sessSt_1_\(imageData.1).jpeg"
             let fileURL = desktopURL.appendingPathComponent(filename)
             
             do {
-                try imageData.write(to: fileURL)
+                try imageData.0.write(to: fileURL)
             } catch {
                 DebugUtils.log("Unexpected error: \(error).")
             }
@@ -189,14 +191,14 @@ open class ScreenshotManager {
         messagesQueue.addOperation {
             var entries: [TarEntry] = []
             for imageData in images {
-                let filename = "\(String(format: "%06d", self.lastIndex)).jpeg"
-                var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData)
+                let filename = "\(self.firstTs)_1_\(imageData.1).jpeg"
+                var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
                 tarEntry.info.permissions = Permissions(rawValue: 420)
                 tarEntry.info.creationTime = Date()
                 tarEntry.info.modificationTime = Date()
                 
                 entries.append(tarEntry)
-                self.lastIndex+=1
+                self.lastTs = imageData.1
             }
             do {
                 let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
@@ -220,24 +222,24 @@ open class ScreenshotManager {
         guard let sessionId = NetworkManager.shared.sessionId else {
             return
         }
-        let archiveName = "\(sessionId)-\(String(format: "%06d", self.lastIndex)).tar.gz"
+        let archiveName = "\(sessionId)-\(self.lastTs).tar.gz"
         var combinedData = Data()
         let images = screenshots
         for (_, imageData) in screenshots.enumerated() {
-            combinedData.append(imageData)
+            combinedData.append(imageData.0)
         }
     
         messagesQueue.addOperation {
             var entries: [TarEntry] = []
             for imageData in images {
-                let filename = "\(String(format: "%06d", self.lastIndex)).jpeg"
-                var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData)
+                let filename = "\(self.firstTs)_1_\(imageData.1).jpeg"
+                var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
                 tarEntry.info.permissions = Permissions(rawValue: 420)
                 tarEntry.info.creationTime = Date()
                 tarEntry.info.modificationTime = Date()
                 
                 entries.append(tarEntry)
-                self.lastIndex+=1
+                self.lastTs = imageData.1
             }
             do {
                 let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
