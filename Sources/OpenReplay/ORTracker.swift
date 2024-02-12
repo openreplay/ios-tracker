@@ -11,7 +11,7 @@ open class Openreplay: NSObject {
     @objc public static let shared = Openreplay()
     public let userDefaults = UserDefaults(suiteName: "io.asayer.AsayerSDK-defaults")
     public var projectKey: String?
-    public var pkgVersion = "1.0.9"
+    public var pkgVersion = "1.0.10"
     public var sessionStartTs: UInt64 = 0
     public var trackerState = CheckState.unchecked
     private var networkCheckTimer: Timer?
