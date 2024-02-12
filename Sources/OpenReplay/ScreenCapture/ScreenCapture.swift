@@ -159,9 +159,9 @@ open class ScreenshotManager {
         guard let sessionId = NetworkManager.shared.sessionId else {
             return
         }
+        let archiveName = "\(sessionId)-\(self.lastTs).tar.gz"
         let localFilePath = "/Users/nikitamelnikov/Desktop/session/"
         let desktopURL = URL(fileURLWithPath: localFilePath)
-        let archiveName = "\(sessionId)-\(self.lastTs).tar.gz"
         let archiveURL = desktopURL.appendingPathComponent(archiveName)
 
         // Ensure the directory exists
