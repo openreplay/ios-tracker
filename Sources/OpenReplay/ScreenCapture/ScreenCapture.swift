@@ -161,7 +161,7 @@ open class ScreenshotManager {
         }
         let localFilePath = "/Users/nikitamelnikov/Desktop/session/"
         let desktopURL = URL(fileURLWithPath: localFilePath)
-        var archiveName = "\(sessionId)-\(self.lastTs).tar.gz"
+        let archiveName = "\(sessionId)-\(self.lastTs).tar.gz"
         let archiveURL = desktopURL.appendingPathComponent(archiveName)
 
         // Ensure the directory exists

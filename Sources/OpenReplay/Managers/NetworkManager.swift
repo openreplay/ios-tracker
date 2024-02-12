@@ -40,7 +40,11 @@ class NetworkManager: NSObject {
                 guard let data = data,
                       let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode) else {
-                    DebugUtils.error(">>>>>> Error in call \(request.url?.absoluteString ?? "") : \(error?.localizedDescription ?? "N/A")")
+                    let failedUrl = request.url?.absoluteString ?? ""
+                    let errorStr = error?.localizedDescription ?? "N/A"
+                    let respData = String(data: data ?? Data(), encoding: .utf8) ?? ""
+                    DebugUtils.error(">>>>>> Error in call \(failedUrl), \n error: \(errorStr) \n response: \(respData)")
+                    
                     if (response as? HTTPURLResponse)?.statusCode == 401 {
                         self.token = nil
                         Openreplay.shared.startSession(projectKey: Openreplay.shared.projectKey ?? "", options: Openreplay.shared.options)
