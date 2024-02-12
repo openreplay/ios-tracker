@@ -90,14 +90,14 @@ class MessageCollector: NSObject {
 
     func sendMessage(_ message: ORMessage) {
         let data = message.contentData()
-        #if DEBUG
-        if !message.description.contains("IOSLog") && !message.description.contains("IOSNetworkCall") {
-            DebugUtils.log(message.description)
+        if (Openreplay.shared.options.debugLogs) {
+            if !message.description.contains("IOSLog") && !message.description.contains("IOSNetworkCall") {
+                DebugUtils.log(message.description)
+            }
+            if let networkCallMessage = message as? ORIOSNetworkCall {
+                DebugUtils.log("-->> IOSNetworkCall(105): \(networkCallMessage.method) \(networkCallMessage.URL)")
+            }
         }
-        if let networkCallMessage = message as? ORIOSNetworkCall {
-            DebugUtils.log("-->> IOSNetworkCall(105): \(networkCallMessage.method) \(networkCallMessage.URL)")
-        }
-        #endif
         self.sendRawMessage(data)
     }
     

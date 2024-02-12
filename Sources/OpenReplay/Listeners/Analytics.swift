@@ -57,9 +57,9 @@ open class Analytics: NSObject {
     }
     
     @objc func textInputFinished(_ sender: UITextField) {
-        #if DEBUG
-        DebugUtils.log(">>>>>Text finish \(sender.text ?? "no_text") \(sender.placeholder ?? "no_placeholder")")
-        #endif
+        if (Openreplay.shared.options.debugLogs) {
+            DebugUtils.log(">>>>>Text finish \(sender.text ?? "no_text") \(sender.placeholder ?? "no_placeholder")")
+        }
         var sentText = sender.text
         if sender.isSecureTextEntry {
             sentText = "***"

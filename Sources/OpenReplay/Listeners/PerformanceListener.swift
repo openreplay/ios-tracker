@@ -41,18 +41,18 @@ open class PerformanceListener: NSObject {
     }
     
     @objc func resume() {
-        #if DEBUG
-        DebugUtils.log("Resume")
-        #endif
+        if (Openreplay.shared.options.debugLogs) {
+            DebugUtils.log("Resume")
+        }
         getCpuMessage()
         getMemoryMessage()
         MessageCollector.shared.sendMessage(ORIOSPerformanceEvent(name: "background", value: UInt64(0)))
     }
     
     @objc func pause() {
-        #if DEBUG
-        DebugUtils.log("Background")
-        #endif
+        if (Openreplay.shared.options.debugLogs) {
+            DebugUtils.log("Background")
+        }
         MessageCollector.shared.sendMessage(ORIOSPerformanceEvent(name: "background", value: UInt64(1)))
     }
     

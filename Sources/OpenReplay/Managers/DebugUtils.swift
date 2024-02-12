@@ -9,8 +9,8 @@ class DebugUtils: NSObject {
     }
 
     static func log(_ str: String) {
-        #if DEBUG
-        print(str)
-        #endif
+        if (Openreplay.shared.options.debugLogs) {
+         print(str)
+        }
     }
 }

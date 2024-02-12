@@ -52,16 +52,16 @@ open class ScreenshotManager {
     }
 
     public func addSanitizedElement(_ element: Sanitizable) {
-        #if DEBUG
-        DebugUtils.log("addSanitizedElement")
-        #endif
+        if (Openreplay.shared.options.debugLogs) {
+            DebugUtils.log("addSanitizedElement")
+        }
         sanitizedElements.append(element)
     }
 
     public func removeSanitizedElement(_ element: Sanitizable) {
-        #if DEBUG
-        DebugUtils.log("removeSanitizedElement")
-        #endif
+        if (Openreplay.shared.options.debugLogs) {
+            DebugUtils.log("removeSanitizedElement")
+        }
         sanitizedElements.removeAll { $0 as AnyObject === element as AnyObject }
     }
 
@@ -120,11 +120,11 @@ open class ScreenshotManager {
                         context.strokePath()
                         context.restoreGState()
                         
-                        #if DEBUG
-                        context.setStrokeColor(UIColor.black.cgColor)
-                        context.setLineWidth(1)
-                        context.stroke(convertedFrame)
-                        #endif
+                        if (Openreplay.shared.options.debugImages) {
+                            context.setStrokeColor(UIColor.black.cgColor)
+                            context.setLineWidth(1)
+                            context.stroke(convertedFrame)
+                        }
                     }
                 } else {
                     removeSanitizedElement(element)
@@ -173,20 +173,20 @@ open class ScreenshotManager {
         let images = screenshots
         for (_, imageData) in screenshots.enumerated() {
             combinedData.append(imageData.0)
-            #if DEBUG
-            let filename = "sessSt_1_\(imageData.1).jpeg"
-            let fileURL = desktopURL.appendingPathComponent(filename)
-            
-            do {
-                try imageData.0.write(to: fileURL)
-            } catch {
-                DebugUtils.log("Unexpected error: \(error).")
+            if (Openreplay.shared.options.debugImages) {
+                let filename = "sessSt_1_\(imageData.1).jpeg"
+                let fileURL = desktopURL.appendingPathComponent(filename)
+                
+                do {
+                    try imageData.0.write(to: fileURL)
+                } catch {
+                    DebugUtils.log("Unexpected error: \(error).")
+                }
             }
-            #endif
         }
-        #if DEBUG
-        DebugUtils.log("saved image files in \(localFilePath)")
-        #endif
+        if (Openreplay.shared.options.debugLogs) {
+            DebugUtils.log("saved image files in \(localFilePath)")
+        }
     
         messagesQueue.addOperation {
             var entries: [TarEntry] = []
@@ -203,13 +203,13 @@ open class ScreenshotManager {
             do {
                 let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
                 
-                #if DEBUG
-                try gzData.write(to: archiveURL)
-                DebugUtils.log("Archive saved to \(archiveURL.path)")
-                MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
-                #else
-                MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
-                #endif
+                if (Openreplay.shared.options.debugImages) {
+                    try gzData.write(to: archiveURL)
+                    DebugUtils.log("Archive saved to \(archiveURL.path)")
+                    MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
+                } else {
+                    MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
+                }
             } catch {
                 DebugUtils.log("Error writing tar.gz data: \(error)")
             }

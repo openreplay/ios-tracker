@@ -12,16 +12,13 @@ class NetworkManager: NSObject {
     public var sessionId: String? = nil
     private var token: String? = nil
     public var writeToFile = false
-    #if DEBUG
-    private let localFilePath = "/Users/nikitamelnikov/Desktop/session.dat"
-    #endif
 
     override init() {
-        #if DEBUG
-        if writeToFile, FileManager.default.fileExists(atPath: localFilePath) {
-            try? FileManager.default.removeItem(at: URL(fileURLWithPath: localFilePath))
+        if (Openreplay.shared.options.debugLogs) {
+            if writeToFile, FileManager.default.fileExists(atPath: "/Users/nikitamelnikov/Desktop/session.dat") {
+                try? FileManager.default.removeItem(at: URL(fileURLWithPath: "/Users/nikitamelnikov/Desktop/session.dat"))
+            }
         }
-        #endif
     }
 
     private func createRequest(method: String, path: String) -> URLRequest {
@@ -177,19 +174,19 @@ class NetworkManager: NSObject {
     }
 
     private func appendLocalFile(data: Data) {
-        #if DEBUG
-        DebugUtils.log("appendInFile \(data.count) bytes")
-        
-        let fileURL = URL(fileURLWithPath: localFilePath)
-        if let fileHandle = try? FileHandle(forWritingTo: fileURL) {
-            defer {
-                fileHandle.closeFile()
+        if (Openreplay.shared.options.debugLogs) {
+            DebugUtils.log("appendInFile \(data.count) bytes")
+            
+            let fileURL = URL(fileURLWithPath: "/Users/nikitamelnikov/Desktop/session.dat")
+            if let fileHandle = try? FileHandle(forWritingTo: fileURL) {
+                defer {
+                    fileHandle.closeFile()
+                }
+                fileHandle.seekToEndOfFile()
+                fileHandle.write(data)
+            } else {
+                try? data.write(to: fileURL, options: .atomic)
             }
-            fileHandle.seekToEndOfFile()
-            fileHandle.write(data)
-        } else {
-            try? data.write(to: fileURL, options: .atomic)
         }
-        #endif
     }
 }
