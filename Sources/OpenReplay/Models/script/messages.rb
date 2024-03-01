@@ -49,7 +49,6 @@ message 98, 'IOSViewComponentEvent' do
     boolean 'Visible'
 end
 
-
 message 100, 'IOSClickEvent' do
     uint 'Timestamp'
     uint 'Length'
@@ -61,8 +60,6 @@ end
 message 101, 'IOSInputEvent' do
     uint 'Timestamp'
     uint 'Length'
-    string 'Value'
-    boolean 'ValueMasked'
     string 'Label'
 end
 

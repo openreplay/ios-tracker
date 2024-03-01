@@ -32,8 +32,9 @@ class NetworkManager: NSObject {
                  onSuccess: @escaping (Data) -> Void,
                  onError: @escaping (Error?) -> Void) {
         guard !writeToFile else { return }
+        print("call api")
         let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
-            
+            print("test")
             DebugUtils.log(">>>\(request.httpMethod ?? ""):\(request.url?.absoluteString ?? "")\n<<<\(String(data: data ?? Data(), encoding: .utf8) ?? "")")
             
             DispatchQueue.main.async {
@@ -66,8 +67,10 @@ class NetworkManager: NSObject {
         var request = createRequest(method: "POST", path: START_URL)
         guard let jsonData = try? JSONSerialization.data(withJSONObject: params, options: []) else {
             completion(nil)
+            print("no params data")
             return
         }
+        print("test req")
         request.httpBody = jsonData
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         callAPI(request: request) { (data) in
@@ -77,12 +80,13 @@ class NetworkManager: NSObject {
                 self.token = session.token
                 self.sessionId = session.sessionID
                 ORUserDefaults.shared.lastToken = self.token
-
+                print("got session")
                 completion(session)
             } catch {
                 DebugUtils.log("Can't unwrap session start resp: \(error)")
             }
         } onError: { _ in
+            print("err")
             completion(nil)
         }
     }

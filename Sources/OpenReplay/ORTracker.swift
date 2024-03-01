@@ -15,6 +15,7 @@ open class Openreplay: NSObject {
     public var sessionStartTs: UInt64 = 0
     public var trackerState = CheckState.unchecked
     private var networkCheckTimer: Timer?
+    public var bufferingMode = false
     public var serverURL: String {
         get { NetworkManager.shared.baseUrl }
         set { NetworkManager.shared.baseUrl = newValue }
@@ -23,10 +24,9 @@ open class Openreplay: NSObject {
 
     @objc open func start(projectKey: String, options: OROptions) {
         self.options = options
+        self.projectKey = projectKey
         let monitor = NWPathMonitor()
         let q = DispatchQueue.global(qos: .background)
-        
-        self.projectKey = projectKey
         
         monitor.start(queue: q)
         
@@ -65,10 +65,10 @@ open class Openreplay: NSObject {
     
     @objc open func startSession(projectKey: String, options: OROptions) {
         self.projectKey = projectKey
-        ORSessionRequest.create() { sessionResponse in
+        ORSessionRequest.create(doNotRecord: false) { sessionResponse in
             guard let sessionResponse = sessionResponse else { return print("Openreplay: no response from /start request") }
             self.sessionStartTs = UInt64(Date().timeIntervalSince1970 * 1000)
-            let captureSettings = getCaptureSettings(fps: sessionResponse.fps, quality: sessionResponse.quality)
+            let captureSettings = getCaptureSettings(fps: 3, quality: "high") // getCaptureSettings(fps: sessionResponse.fps, quality: sessionResponse.quality)
             ScreenshotManager.shared.setSettings(settings: captureSettings)
             
             MessageCollector.shared.start()
@@ -86,12 +86,64 @@ open class Openreplay: NSObject {
             }
             
             if options.screen {
-                ScreenshotManager.shared.start(self.sessionStartTs)
+                ScreenshotManager.shared.start(startTs: self.sessionStartTs)
             }
             
             if options.analytics {
                 Analytics.shared.start()
             }
+        }
+    }
+    
+    @objc open func coldStart(projectKey: String, options: OROptions) {
+        self.options = options
+        self.projectKey = projectKey
+        self.bufferingMode = true
+        print("cold start")
+        ORSessionRequest.create(doNotRecord: true) { sessionResponse in
+            guard let sessionResponse = sessionResponse else { return print("Openreplay: no response from /start request") }
+            self.sessionStartTs = UInt64(Date().timeIntervalSince1970 * 1000)
+            print("getting conds \(sessionResponse)")
+            ConditionsManager.shared.getConditions(projectId: sessionResponse.projectID, token: sessionResponse.token)
+            let captureSettings = getCaptureSettings(fps: sessionResponse.fps, quality: sessionResponse.quality)
+
+            MessageCollector.shared.cycleBuffer()
+
+            if options.logs {
+                LogsListener.shared.start()
+            }
+            
+            if options.crashes {
+                Crashs.shared.start()
+            }
+            
+            if options.performances {
+                PerformanceListener.shared.start()
+            }
+            
+            if options.screen {
+                ScreenshotManager.shared.setSettings(settings: captureSettings)
+                ScreenshotManager.shared.start(startTs: self.sessionStartTs)
+                ScreenshotManager.shared.cycleBuffer()
+            }
+            
+            if options.analytics {
+                Analytics.shared.start()
+            }
+        }
+    }
+    
+    @objc open func triggerRecording(condition: String?) {
+        self.bufferingMode = false
+        ORSessionRequest.create(doNotRecord: false) { sessionResponse in
+            guard let sessionResponse = sessionResponse else { return print("Openreplay: no response from /start request") }
+            
+            // sending buffered messages and images - should not be bigger than 30sec buffer,
+            // so the performance impact is minimal (as long as fps was lower than 10)
+            MessageCollector.shared.syncBuffers()
+            ScreenshotManager.shared.syncBuffers()
+            
+            MessageCollector.shared.start()
         }
     }
     

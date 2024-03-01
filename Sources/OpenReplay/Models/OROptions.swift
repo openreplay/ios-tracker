@@ -17,6 +17,7 @@ open class OROptions: NSObject {
     let debugImages: Bool
     
     public static let defaults = OROptions(crashes: true, analytics: true, performances: true, logs: true, screen: true, wifiOnly: true, debugLogs: false, debugImages: false)
+    public static let defaultDebug = OROptions(crashes: true, analytics: true, performances: true, logs: true, screen: true, wifiOnly: true, debugLogs: true, debugImages: false)
 
     @objc public init(crashes: Bool, analytics: Bool, performances: Bool, logs: Bool, screen: Bool, wifiOnly: Bool, debugLogs: Bool, debugImages: Bool) {
         self.crashes = crashes

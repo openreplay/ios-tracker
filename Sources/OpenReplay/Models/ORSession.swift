@@ -4,7 +4,7 @@ import DeviceKit
 class ORSessionRequest: NSObject {
     private static var params = [String: AnyHashable]()
 
-    static func create( completion: @escaping (ORSessionResponse?) -> Void) {
+    static func create(doNotRecord: Bool,  completion: @escaping (ORSessionResponse?) -> Void) {
         guard let projectKey = Openreplay.shared.projectKey else { return print("Openreplay: no project key added") }
 //         #warning("Can interfere with client usage")
         UIDevice.current.isBatteryMonitoringEnabled = true
@@ -36,6 +36,7 @@ class ORSessionRequest: NSObject {
 
         DebugUtils.log(">>>> device \(device) type \(device.safeDescription) mem \(UInt64(ProcessInfo.processInfo.physicalMemory / 1024))")
         params = [
+            "doNotRecord": doNotRecord,
             "projectKey": projectKey,
             "trackerVersion": Openreplay.shared.pkgVersion,
             "revID": Bundle(for: Openreplay.shared.classForCoder).object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "N/A",
@@ -73,6 +74,7 @@ struct ORSessionResponse: Decodable {
     let sessionID: String
     let fps: Int
     let quality: String
+    let projectID: String
 }
 
 func getTimezone() -> String {

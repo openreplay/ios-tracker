@@ -14,6 +14,9 @@ open class ScreenshotManager {
     private var sanitizedElements: [Sanitizable] = []
     private var observedInputs: [UITextField] = []
     private var screenshots: [(Data, UInt64)] = []
+    private var screenshotsBackup: [(Data, UInt64)] = []
+    private var tick: UInt64 = 0
+    private var bufferTimer: Timer?
     private var lastTs: UInt64 = 0
     private var firstTs: UInt64 = 0
     // MARK: capture settings
@@ -27,7 +30,7 @@ open class ScreenshotManager {
     
     private init() { }
 
-    func start(_ startTs: UInt64) {
+    func start(startTs: UInt64) {
         firstTs = startTs
         startTakingScreenshots(every: settings.captureRate)
     }
@@ -142,8 +145,11 @@ open class ScreenshotManager {
         // Get the resulting image
         if let image = UIGraphicsGetImageFromCurrentImageContext() {
             if let compressedData = image.jpegData(compressionQuality: self.settings.imgCompression) {
+                if (Openreplay.shared.bufferingMode) {
+                    self.screenshotsBackup.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
+                }
                 screenshots.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
-                if screenshots.count >= 10 {
+                if !Openreplay.shared.bufferingMode && screenshots.count >= 20 {
                     self.sendScreenshots()
                 }
             }
@@ -151,10 +157,37 @@ open class ScreenshotManager {
         UIGraphicsEndImageContext()
     }
 
-    // Not using this because no idea how to sync it with the replay fps rn
-    //func onError() {
-    //    takeScreenshot()
-    //}
+    func cycleBuffer() {
+        bufferTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true, block: { [weak self] _ in
+            if Openreplay.shared.bufferingMode {
+                let currTick = self?.tick ?? 0
+                if (currTick % 2 == 0) {
+                    self?.screenshots.removeAll()
+                } else {
+                    self?.screenshotsBackup.removeAll()
+                }
+                self?.tick += 1
+            }
+        })
+    }
+
+    func syncBuffers() {
+        let buf1 = self.screenshots.count
+        let buf2 = self.screenshotsBackup.count
+        self.tick = 0
+        bufferTimer?.invalidate()
+        bufferTimer = nil
+
+        if buf1 > buf2 {
+            self.screenshotsBackup.removeAll()
+        } else {
+            self.screenshots = self.screenshotsBackup
+            self.screenshotsBackup.removeAll()
+        }
+        
+        self.sendScreenshots()
+    }
+
     func saveScreenshotsLocally() {
         guard let sessionId = NetworkManager.shared.sessionId else {
             return
