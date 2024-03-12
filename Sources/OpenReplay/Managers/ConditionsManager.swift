@@ -30,11 +30,6 @@ class ConditionsManager: NSObject {
         guard let messageType = msg.message else { return nil }
         
         let matchingConditions = mappedConditions.filter { $0.tp == messageType }
-        if msg is ORIOSLog {
-            // todo
-        } else {
-            print(msg, matchingConditions)
-        }
         for activeCon in matchingConditions {
             switch msg {
             case let networkMsg as ORIOSNetworkCall:
@@ -110,7 +105,7 @@ class ConditionsManager: NSObject {
     
     func getConditions(projectId: String, token: String) {
         guard let url = URL(string: "\(Openreplay.shared.serverURL)/v1/mobile/conditions/\(projectId)") else {
-                print("Invalid URL")
+                DebugUtils.error("Invalid URL")
                 return
             }
 
@@ -120,20 +115,19 @@ class ConditionsManager: NSObject {
 
             let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
                 guard let self = self, let data = data, error == nil else {
-                    print("Network request failed: \(error?.localizedDescription ?? "No error")")
+                    DebugUtils.error("Network request to get conditions failed: \(error?.localizedDescription ?? "No error")")
                     return
                 }
 
                 do {
                     let jsonResponse = try JSONDecoder().decode([String: [ApiResponse]].self, from: data)
                     guard let conditions = jsonResponse["conditions"] else {
-                        print("Conditions key not found in JSON")
+                        DebugUtils.error("Conditions key not found in JSON")
                         return
                     }
-                    print("got api \(conditions)")
                     self.mapConditions(resp: conditions)
                 } catch {
-                    DebugUtils.error("JSON parsing error: \(error)")
+                    DebugUtils.error("Openreplay: Conditions JSON parsing error: \(error)")
                 }
             }
 
@@ -141,7 +135,6 @@ class ConditionsManager: NSObject {
         }
     
     func mapConditions(resp: [ApiResponse]) {
-        print(resp)
         var conds: [Condition] = []
         resp.forEach({ condition in
             let filters = condition.filters
@@ -176,7 +169,7 @@ class ConditionsManager: NSObject {
                 }
             })
         })
-        print(conds)
+        DebugUtils.log("conditions \(conds)")
         if !conds.isEmpty {
             self.mappedConditions = conds
         }

@@ -136,7 +136,7 @@ class MessageCollector: NSObject {
         let data = message.contentData()
         if (Openreplay.shared.options.debugLogs) {
             if !message.description.contains("IOSLog") && !message.description.contains("IOSNetworkCall") {
-//                DebugUtils.log(message.description)
+                DebugUtils.log(message.description)
             }
             if let networkCallMessage = message as? ORIOSNetworkCall {
                 DebugUtils.log("-->> IOSNetworkCall(105): \(networkCallMessage.method) \(networkCallMessage.URL)")

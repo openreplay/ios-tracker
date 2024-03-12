@@ -11,7 +11,7 @@ open class Openreplay: NSObject {
     @objc public static let shared = Openreplay()
     public let userDefaults = UserDefaults(suiteName: "io.asayer.AsayerSDK-defaults")
     public var projectKey: String?
-    public var pkgVersion = "1.0.10"
+    public var pkgVersion = "1.1.10"
     public var sessionStartTs: UInt64 = 0
     public var trackerState = CheckState.unchecked
     private var networkCheckTimer: Timer?
@@ -99,11 +99,9 @@ open class Openreplay: NSObject {
         self.options = options
         self.projectKey = projectKey
         self.bufferingMode = true
-        print("cold start")
         ORSessionRequest.create(doNotRecord: true) { sessionResponse in
             guard let sessionResponse = sessionResponse else { return print("Openreplay: no response from /start request") }
             self.sessionStartTs = UInt64(Date().timeIntervalSince1970 * 1000)
-            print("getting conds \(sessionResponse)")
             ConditionsManager.shared.getConditions(projectId: sessionResponse.projectID, token: sessionResponse.token)
             let captureSettings = getCaptureSettings(fps: sessionResponse.fps, quality: sessionResponse.quality)
 

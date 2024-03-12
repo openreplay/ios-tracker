@@ -21,7 +21,7 @@ public class Crashs: NSObject {
 
     public func start() {
         NSSetUncaughtExceptionHandler { (exception) in
-            print("<><> captured crash \(exception)")
+            DebugUtils.log("<><> captured crash \(exception)")
             let message = ORIOSCrash(name: exception.name.rawValue,
                                      reason: exception.reason ?? "",
                                      stacktrace: exception.callStackSymbols.joined(separator: "\n"))
