@@ -95,7 +95,7 @@ class ConditionsManager: NSObject {
                         return activeCon.name
                     }
                 } else {
-                    if activeCon.op(String(perfMsg.name)) {
+                    if activeCon.op(String(perfMsg.value)) {
                         return activeCon.name
                     }
                 }
@@ -125,7 +125,6 @@ class ConditionsManager: NSObject {
                 }
 
                 do {
-                    print(token, data, response)
                     let jsonResponse = try JSONDecoder().decode([String: [ApiResponse]].self, from: data)
                     guard let conditions = jsonResponse["conditions"] else {
                         print("Conditions key not found in JSON")

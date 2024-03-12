@@ -76,16 +76,7 @@ class MessageCollector: NSObject {
             self.messagesWaitingBackup.removeAll()
         }
         
-        catchUpTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true, block: { [weak self] _ in
-            let isEmpty = self?.messagesWaiting.isEmpty ?? true
-            if isEmpty {
-                self?.catchUpTimer?.invalidate()
-                return
-            }
-            
-            self?.flushMessages()
-        })
-        
+        self.flushMessages()
     }
     
     func stop() {
