@@ -41,7 +41,7 @@ open class Analytics: NSObject {
     }
     
     @objc public func sendClick(label: String, x: UInt64, y: UInt64) {
-        let message = ORIOSClickEvent(label: label, x: x, y: y)
+        let message = ORMobileClickEvent(label: label, x: x, y: y)
         
         if Analytics.shared.enabled {
             MessageCollector.shared.sendMessage(message)
@@ -49,7 +49,7 @@ open class Analytics: NSObject {
     }
     
     @objc public func sendSwipe(label: String, x: UInt64, y: UInt64, direction: String) {
-        let message = ORIOSSwipeEvent(label: label, x: x,y: y, direction: direction)
+        let message = ORMobileSwipeEvent(label: label, x: x,y: y, direction: direction)
         
         if Analytics.shared.enabled {
             MessageCollector.shared.sendMessage(message)
@@ -64,7 +64,7 @@ open class Analytics: NSObject {
         if sender.isSecureTextEntry {
             sentText = "***"
         }
-        MessageCollector.shared.sendMessage(ORIOSInputEvent(value: sentText ?? "", valueMasked: sender.isSecureTextEntry, label: sender.placeholder ?? ""))
+        MessageCollector.shared.sendMessage(ORMobileInputEvent(value: sentText ?? "", valueMasked: sender.isSecureTextEntry, label: sender.placeholder ?? ""))
     }
 }
 
@@ -88,7 +88,7 @@ extension UIViewController {
         self.swizzledViewDidAppear(animated)
                 
         if let (screenName, viewName) = isViewOrSubviewObservedEnter() {
-            let message = ORIOSViewComponentEvent(screenName: screenName, viewName: viewName, visible: true)
+            let message = ORMobileViewComponentEvent(screenName: screenName, viewName: viewName, visible: true)
             if Analytics.shared.enabled {
                 MessageCollector.shared.sendMessage(message)
             }
@@ -99,7 +99,7 @@ extension UIViewController {
         self.swizzledViewDidDisappear(animated)
         
         if let (screenName, viewName) = isViewOrSubviewObservedEnter() {
-            let message = ORIOSViewComponentEvent(screenName: screenName, viewName: viewName, visible: false)
+            let message = ORMobileViewComponentEvent(screenName: screenName, viewName: viewName, visible: false)
             if Analytics.shared.enabled {
                 MessageCollector.shared.sendMessage(message)
             }
@@ -141,9 +141,9 @@ public class TouchTrackingWindow: UIWindow {
                 let description = getViewDescription(touch.view) ?? "UIView"
                 if isSwipe {
                     DebugUtils.log("Swipe from \(touchStart ?? CGPoint(x: 0, y: 0)) to \(location)")
-                    event = ORIOSSwipeEvent(label: description, x: UInt64(location.x),y: UInt64(location.y), direction: detectSwipeDirection(from: touchStart!, to: location))
+                    event = ORMobileSwipeEvent(label: description, x: UInt64(location.x),y: UInt64(location.y), direction: detectSwipeDirection(from: touchStart!, to: location))
                 } else {
-                    event = ORIOSClickEvent(label: description, x: UInt64(location.x), y: UInt64(location.y))
+                    event = ORMobileClickEvent(label: description, x: UInt64(location.x), y: UInt64(location.y))
                     DebugUtils.log("Touch from \(touchStart ?? CGPoint(x: 0, y: 0)) to \(location)")
                 }
                 touchStart = nil
@@ -223,7 +223,7 @@ public struct ObservedInputModifier: ViewModifier {
         if masked ?? false {
             sentValue = "****"
         }
-        MessageCollector.shared.sendDebouncedMessage(ORIOSInputEvent(value: sentValue, valueMasked: masked ?? false, label: label ?? ""))
+        MessageCollector.shared.sendDebouncedMessage(ORMobileInputEvent(value: sentValue, valueMasked: masked ?? false, label: label ?? ""))
     }
 }
 
@@ -235,7 +235,7 @@ public struct ViewLifecycleModifier: ViewModifier {
         content
             .onAppear {
                 DebugUtils.log("<><><>view appear \(viewName)")
-                let message = ORIOSViewComponentEvent(screenName: screenName, viewName: viewName, visible: true)
+                let message = ORMobileViewComponentEvent(screenName: screenName, viewName: viewName, visible: true)
                 if Analytics.shared.enabled {
                     MessageCollector.shared.sendMessage(message)
                 }
@@ -243,7 +243,7 @@ public struct ViewLifecycleModifier: ViewModifier {
             }
             .onDisappear {
                 DebugUtils.log("<><><>disappear view \(viewName)")
-                let message = ORIOSViewComponentEvent(screenName: screenName, viewName: viewName, visible: false)
+                let message = ORMobileViewComponentEvent(screenName: screenName, viewName: viewName, visible: false)
                 if Analytics.shared.enabled {
                     MessageCollector.shared.sendMessage(message)
                 }

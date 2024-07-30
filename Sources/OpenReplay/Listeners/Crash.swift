@@ -22,7 +22,7 @@ public class Crashs: NSObject {
     public func start() {
         NSSetUncaughtExceptionHandler { (exception) in
             DebugUtils.log("<><> captured crash \(exception)")
-            let message = ORIOSCrash(name: exception.name.rawValue,
+            let message = ORMobileCrash(name: exception.name.rawValue,
                                      reason: exception.reason ?? "",
                                      stacktrace: exception.callStackSymbols.joined(separator: "\n"))
             let messageData = message.contentData()
@@ -41,7 +41,7 @@ public class Crashs: NSObject {
     }
     
     public func sendLateError(exception: NSException) {
-        let message = ORIOSCrash(name: exception.name.rawValue,
+        let message = ORMobileCrash(name: exception.name.rawValue,
                                  reason: exception.reason ?? "",
                                  stacktrace: exception.callStackSymbols.joined(separator: "\n")
         )

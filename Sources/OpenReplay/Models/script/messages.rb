@@ -1,30 +1,30 @@
-message 92, 'IOSMetadata' do
+message 92, 'MobileMetadata' do
     uint 'Timestamp'
     uint 'Length'
     string 'Key'
     string 'Value'
 end
 
-message 93, 'IOSEvent' do
+message 93, 'MobileEvent' do
     uint 'Timestamp'
     uint 'Length'
     string 'Name'
     string 'Payload'
 end
 
-message 94, 'IOSUserID' do
+message 94, 'MobileUserID' do
     uint 'Timestamp'
     uint 'Length'
     string 'ID'
 end
 
-message 95, 'IOSUserAnonymousID' do
+message 95, 'MobileUserAnonymousID' do
     uint 'Timestamp'
     uint 'Length'
     string 'ID'
 end
 
-message 96, 'IOSScreenChanges' do
+message 96, 'MobileScreenChanges' do
     uint 'Timestamp'
     uint 'Length'
     uint 'X'
@@ -33,7 +33,7 @@ message 96, 'IOSScreenChanges' do
     uint 'Height'
 end
 
-message 97, 'IOSCrash' do
+message 97, 'MobileCrash' do
     uint 'Timestamp'
     uint 'Length'
     string 'Name'
@@ -41,7 +41,7 @@ message 97, 'IOSCrash' do
     string 'Stacktrace'
 end
 
-message 98, 'IOSViewComponentEvent' do
+message 98, 'MobileViewComponentEvent' do
     uint 'Timestamp'
     uint 'Length'
     string 'ScreenName'
@@ -49,7 +49,7 @@ message 98, 'IOSViewComponentEvent' do
     boolean 'Visible'
 end
 
-message 100, 'IOSClickEvent' do
+message 100, 'MobileClickEvent' do
     uint 'Timestamp'
     uint 'Length'
     string 'Label'
@@ -57,9 +57,11 @@ message 100, 'IOSClickEvent' do
     uint 'Y'
 end
 
-message 101, 'IOSInputEvent' do
+message 101, 'MobileInputEvent' do
     uint 'Timestamp'
     uint 'Length'
+    string 'Value'
+    boolean 'ValueMasked'
     string 'Label'
 end
 
@@ -78,39 +80,39 @@ Name/Value may be :
 "memoryUsage": Used memory in bytes
 "fps": Frames per second
 =end
-message 102, 'IOSPerformanceEvent' do
+message 102, 'MobilePerformanceEvent', :replayer => true do
   uint 'Timestamp'
   uint 'Length'
   string 'Name'
   uint 'Value'
 end
 
-message 103, 'IOSLog' do
+message 103, 'MobileLog' do
   uint 'Timestamp'
   uint 'Length'
   string 'Severity' # Possible values ("info", "error")
   string 'Content'
 end
 
-message 104, 'IOSInternalError' do
+message 104, 'MobileInternalError' do
   uint 'Timestamp'
   uint 'Length'
   string 'Content'
 end
 
-message 105, 'IOSNetworkCall' do
-    uint 'Timestamp'
-    uint 'Length'
-    string 'Type'
-    string 'Method'
-    string 'URL'
-    string 'Request'
-    string 'Response'
-    uint 'Status'
-    uint 'Duration'
+message 105, 'MobileNetworkCall' do
+   uint 'Timestamp'
+   uint 'Length'
+   string 'Type'
+   string 'Method'
+   string 'URL'
+   string 'Request'
+   string 'Response'
+   uint 'Status'
+   uint 'Duration'
 end
 
-message 106, 'IOSSwipeEvent' do
+message 106, 'MobileSwipeEvent' do
     uint 'Timestamp'
     uint 'Length'
     string 'Label'
@@ -119,7 +121,7 @@ message 106, 'IOSSwipeEvent' do
     string 'Direction'
 end
 
-message 107, 'IOSBatchMeta' do
+message 107, 'MobileBatchMeta' do
     uint 'Timestamp'
     uint 'Length'
     uint 'FirstIndex'

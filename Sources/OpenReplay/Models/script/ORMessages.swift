@@ -3,31 +3,31 @@
 import UIKit
 
 enum ORMessageType: UInt64 {
-    case iOSMetadata = 92
-    case iOSEvent = 93
-    case iOSUserID = 94
-    case iOSUserAnonymousID = 95
-    case iOSScreenChanges = 96
-    case iOSCrash = 97
-    case iOSViewComponentEvent = 98
-    case iOSClickEvent = 100
-    case iOSInputEvent = 101
-    case iOSPerformanceEvent = 102
-    case iOSLog = 103
-    case iOSInternalError = 104
-    case iOSNetworkCall = 105
-    case iOSSwipeEvent = 106
-    case iOSBatchMeta = 107
+    case mobileMetadata = 92
+    case mobileEvent = 93
+    case mobileUserID = 94
+    case mobileUserAnonymousID = 95
+    case mobileScreenChanges = 96
+    case mobileCrash = 97
+    case mobileViewComponentEvent = 98
+    case mobileClickEvent = 100
+    case mobileInputEvent = 101
+    case mobilePerformanceEvent = 102
+    case mobileLog = 103
+    case mobileInternalError = 104
+    case mobileNetworkCall = 105
+    case mobileSwipeEvent = 106
+    case mobileBatchMeta = 107
 }
 
-class ORIOSMetadata: ORMessage {
+class ORMobileMetadata: ORMessage {
     let key: String
     let value: String
 
     init(key: String, value: String) {
         self.key = key
         self.value = value
-        super.init(messageType: .iOSMetadata)
+        super.init(messageType: .mobileMetadata)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -46,18 +46,18 @@ class ORIOSMetadata: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSMetadata(92): timestamp:\(timestamp) key:\(key) value:\(value)";
+        return "-->> MobileMetadata(92): timestamp:\(timestamp) key:\(key) value:\(value)";
     }
 }
 
-class ORIOSEvent: ORMessage {
+class ORMobileEvent: ORMessage {
     let name: String
     let payload: String
 
     init(name: String, payload: String) {
         self.name = name
         self.payload = payload
-        super.init(messageType: .iOSEvent)
+        super.init(messageType: .mobileEvent)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -76,16 +76,16 @@ class ORIOSEvent: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSEvent(93): timestamp:\(timestamp) name:\(name) payload:\(payload)";
+        return "-->> MobileEvent(93): timestamp:\(timestamp) name:\(name) payload:\(payload)";
     }
 }
 
-class ORIOSUserID: ORMessage {
+class ORMobileUserID: ORMessage {
     let iD: String
 
     init(iD: String) {
         self.iD = iD
-        super.init(messageType: .iOSUserID)
+        super.init(messageType: .mobileUserID)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -103,16 +103,16 @@ class ORIOSUserID: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSUserID(94): timestamp:\(timestamp) iD:\(iD)";
+        return "-->> MobileUserID(94): timestamp:\(timestamp) iD:\(iD)";
     }
 }
 
-class ORIOSUserAnonymousID: ORMessage {
+class ORMobileUserAnonymousID: ORMessage {
     let iD: String
 
     init(iD: String) {
         self.iD = iD
-        super.init(messageType: .iOSUserAnonymousID)
+        super.init(messageType: .mobileUserAnonymousID)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -130,11 +130,11 @@ class ORIOSUserAnonymousID: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSUserAnonymousID(95): timestamp:\(timestamp) iD:\(iD)";
+        return "-->> MobileUserAnonymousID(95): timestamp:\(timestamp) iD:\(iD)";
     }
 }
 
-class ORIOSScreenChanges: ORMessage {
+class ORMobileScreenChanges: ORMessage {
     let x: UInt64
     let y: UInt64
     let width: UInt64
@@ -145,7 +145,7 @@ class ORIOSScreenChanges: ORMessage {
         self.y = y
         self.width = width
         self.height = height
-        super.init(messageType: .iOSScreenChanges)
+        super.init(messageType: .mobileScreenChanges)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -166,11 +166,11 @@ class ORIOSScreenChanges: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSScreenChanges(96): timestamp:\(timestamp) x:\(x) y:\(y) width:\(width) height:\(height)";
+        return "-->> MobileScreenChanges(96): timestamp:\(timestamp) x:\(x) y:\(y) width:\(width) height:\(height)";
     }
 }
 
-class ORIOSCrash: ORMessage {
+class ORMobileCrash: ORMessage {
     let name: String
     let reason: String
     let stacktrace: String
@@ -179,7 +179,7 @@ class ORIOSCrash: ORMessage {
         self.name = name
         self.reason = reason
         self.stacktrace = stacktrace
-        super.init(messageType: .iOSCrash)
+        super.init(messageType: .mobileCrash)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -199,11 +199,11 @@ class ORIOSCrash: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSCrash(97): timestamp:\(timestamp) name:\(name) reason:\(reason) stacktrace:\(stacktrace)";
+        return "-->> MobileCrash(97): timestamp:\(timestamp) name:\(name) reason:\(reason) stacktrace:\(stacktrace)";
     }
 }
 
-class ORIOSViewComponentEvent: ORMessage {
+class ORMobileViewComponentEvent: ORMessage {
     let screenName: String
     let viewName: String
     let visible: Bool
@@ -212,7 +212,7 @@ class ORIOSViewComponentEvent: ORMessage {
         self.screenName = screenName
         self.viewName = viewName
         self.visible = visible
-        super.init(messageType: .iOSViewComponentEvent)
+        super.init(messageType: .mobileViewComponentEvent)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -232,11 +232,11 @@ class ORIOSViewComponentEvent: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSViewComponentEvent(98): timestamp:\(timestamp) screenName:\(screenName) viewName:\(viewName) visible:\(visible)";
+        return "-->> MobileViewComponentEvent(98): timestamp:\(timestamp) screenName:\(screenName) viewName:\(viewName) visible:\(visible)";
     }
 }
 
-class ORIOSClickEvent: ORMessage {
+class ORMobileClickEvent: ORMessage {
     let label: String
     let x: UInt64
     let y: UInt64
@@ -245,7 +245,7 @@ class ORIOSClickEvent: ORMessage {
         self.label = label
         self.x = x
         self.y = y
-        super.init(messageType: .iOSClickEvent)
+        super.init(messageType: .mobileClickEvent)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -265,11 +265,11 @@ class ORIOSClickEvent: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSClickEvent(100): timestamp:\(timestamp) label:\(label) x:\(x) y:\(y)";
+        return "-->> MobileClickEvent(100): timestamp:\(timestamp) label:\(label) x:\(x) y:\(y)";
     }
 }
 
-class ORIOSInputEvent: ORMessage {
+class ORMobileInputEvent: ORMessage {
     let value: String
     let valueMasked: Bool
     let label: String
@@ -278,7 +278,7 @@ class ORIOSInputEvent: ORMessage {
         self.value = value
         self.valueMasked = valueMasked
         self.label = label
-        super.init(messageType: .iOSInputEvent)
+        super.init(messageType: .mobileInputEvent)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -298,18 +298,18 @@ class ORIOSInputEvent: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSInputEvent(101): timestamp:\(timestamp) value:\(value) valueMasked:\(valueMasked) label:\(label)";
+        return "-->> MobileInputEvent(101): timestamp:\(timestamp) value:\(value) valueMasked:\(valueMasked) label:\(label)";
     }
 }
 
-class ORIOSPerformanceEvent: ORMessage {
+class ORMobilePerformanceEvent: ORMessage {
     let name: String
     let value: UInt64
 
     init(name: String, value: UInt64) {
         self.name = name
         self.value = value
-        super.init(messageType: .iOSPerformanceEvent)
+        super.init(messageType: .mobilePerformanceEvent)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -328,18 +328,18 @@ class ORIOSPerformanceEvent: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSPerformanceEvent(102): timestamp:\(timestamp) name:\(name) value:\(value)";
+        return "-->> MobilePerformanceEvent(102): timestamp:\(timestamp) name:\(name) value:\(value)";
     }
 }
 
-class ORIOSLog: ORMessage {
+class ORMobileLog: ORMessage {
     let severity: String
     let content: String
 
     init(severity: String, content: String) {
         self.severity = severity
         self.content = content
-        super.init(messageType: .iOSLog)
+        super.init(messageType: .mobileLog)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -358,16 +358,16 @@ class ORIOSLog: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSLog(103): timestamp:\(timestamp) severity:\(severity) content:\(content)";
+        return "-->> MobileLog(103): timestamp:\(timestamp) severity:\(severity) content:\(content)";
     }
 }
 
-class ORIOSInternalError: ORMessage {
+class ORMobileInternalError: ORMessage {
     let content: String
 
     init(content: String) {
         self.content = content
-        super.init(messageType: .iOSInternalError)
+        super.init(messageType: .mobileInternalError)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -385,11 +385,11 @@ class ORIOSInternalError: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSInternalError(104): timestamp:\(timestamp) content:\(content)";
+        return "-->> MobileInternalError(104): timestamp:\(timestamp) content:\(content)";
     }
 }
 
-class ORIOSNetworkCall: ORMessage {
+class ORMobileNetworkCall: ORMessage {
     let type: String
     let method: String
     let URL: String
@@ -406,7 +406,7 @@ class ORIOSNetworkCall: ORMessage {
         self.response = response
         self.status = status
         self.duration = duration
-        super.init(messageType: .iOSNetworkCall)
+        super.init(messageType: .mobileNetworkCall)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -430,11 +430,11 @@ class ORIOSNetworkCall: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSNetworkCall(105): timestamp:\(timestamp) type:\(type) method:\(method) URL:\(URL) request:\(request) response:\(response) status:\(status) duration:\(duration)";
+        return "-->> MobileNetworkCall(105): timestamp:\(timestamp) type:\(type) method:\(method) URL:\(URL) request:\(request) response:\(response) status:\(status) duration:\(duration)";
     }
 }
 
-class ORIOSSwipeEvent: ORMessage {
+class ORMobileSwipeEvent: ORMessage {
     let label: String
     let x: UInt64
     let y: UInt64
@@ -445,7 +445,7 @@ class ORIOSSwipeEvent: ORMessage {
         self.x = x
         self.y = y
         self.direction = direction
-        super.init(messageType: .iOSSwipeEvent)
+        super.init(messageType: .mobileSwipeEvent)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -466,16 +466,16 @@ class ORIOSSwipeEvent: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSSwipeEvent(106): timestamp:\(timestamp) label:\(label) x:\(x) y:\(y) direction:\(direction)";
+        return "-->> MobileSwipeEvent(106): timestamp:\(timestamp) label:\(label) x:\(x) y:\(y) direction:\(direction)";
     }
 }
 
-class ORIOSBatchMeta: ORMessage {
+class ORMobileBatchMeta: ORMessage {
     let firstIndex: UInt64
 
     init(firstIndex: UInt64) {
         self.firstIndex = firstIndex
-        super.init(messageType: .iOSBatchMeta)
+        super.init(messageType: .mobileBatchMeta)
     }
 
     override init?(genericMessage: GenericMessage) {
@@ -493,7 +493,7 @@ class ORIOSBatchMeta: ORMessage {
     }
 
     override var description: String {
-        return "-->> IOSBatchMeta(107): timestamp:\(timestamp) firstIndex:\(firstIndex)";
+        return "-->> MobileBatchMeta(107): timestamp:\(timestamp) firstIndex:\(firstIndex)";
     }
 }
 

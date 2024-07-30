@@ -32,7 +32,7 @@ class ConditionsManager: NSObject {
         let matchingConditions = mappedConditions.filter { $0.tp == messageType }
         for activeCon in matchingConditions {
             switch msg {
-            case let networkMsg as ORIOSNetworkCall:
+            case let networkMsg as ORMobileNetworkCall:
                 if let matchingNetworkConditions = activeCon.subConditions {
                     // we simply check that ALL conditions match
                     var networkConditionsMet = true
@@ -56,27 +56,27 @@ class ConditionsManager: NSObject {
                 } else {
                     continue
                 }
-            case let viewMsg as ORIOSViewComponentEvent:
+            case let viewMsg as ORMobileViewComponentEvent:
                 if (activeCon.op(viewMsg.viewName) || activeCon.op(viewMsg.screenName)) {
                     return activeCon.name
                 }
-            case let clickMsg as ORIOSClickEvent:
+            case let clickMsg as ORMobileClickEvent:
                 if activeCon.op(clickMsg.label) {
                     return activeCon.name
                 }
-            case let metaMsg as ORIOSMetadata:
+            case let metaMsg as ORMobileMetadata:
                 if (activeCon.op(metaMsg.value) || activeCon.op(metaMsg.key)) {
                     return activeCon.name
                 }
-            case let eventMsg as ORIOSEvent:
+            case let eventMsg as ORMobileEvent:
                 if (activeCon.op(eventMsg.payload) || activeCon.op(eventMsg.name)) {
                     return activeCon.name
                 }
-            case let logMsg as ORIOSLog:
+            case let logMsg as ORMobileLog:
                 if activeCon.op(logMsg.content) {
                     return activeCon.name
                 }
-            case let idMsg as ORIOSUserID:
+            case let idMsg as ORMobileUserID:
                 if activeCon.op(idMsg.iD) {
                     return activeCon.name
                 }
@@ -84,7 +84,7 @@ class ConditionsManager: NSObject {
                 // batteryLevel (0..100)
                 // "mainThreadCPU": Possible values (0 .. 100)
                 // "memoryUsage": Used memory in bytes, so we divide by total
-            case let perfMsg as ORIOSPerformanceEvent:
+            case let perfMsg as ORMobilePerformanceEvent:
                 if perfMsg.name == "memoryUsage" {
                     if activeCon.op(String(perfMsg.value / UInt64(ProcessInfo.processInfo.physicalMemory))) {
                         return activeCon.name
@@ -157,7 +157,7 @@ class ConditionsManager: NSObject {
                             target: [],
                             op: { _ in true },
                             type: "network_message",
-                            tp: ORMessageType.iOSNetworkCall,
+                            tp: ORMessageType.mobileNetworkCall,
                             subConditions: networkConditions
                         )
                         conds.append(combinedCondition)
@@ -282,7 +282,7 @@ class OperatorsManager: NSObject {
                     target: cond.value,
                     op: { val in opFn(val, cond.value) },
                     type: cond.type,
-                    tp: ORMessageType.iOSEvent
+                    tp: ORMessageType.mobileEvent
                 )
             case "metadata":
                 return Condition(
@@ -290,7 +290,7 @@ class OperatorsManager: NSObject {
                     target: cond.value,
                     op: { val in opFn(val, cond.value) },
                     type: cond.type,
-                    tp: ORMessageType.iOSMetadata
+                    tp: ORMessageType.mobileMetadata
                 )
             case "userId":
                 return Condition(
@@ -298,7 +298,7 @@ class OperatorsManager: NSObject {
                     target: cond.value,
                     op: { val in opFn(val, cond.value) },
                     type: cond.type,
-                    tp: ORMessageType.iOSUserID
+                    tp: ORMessageType.mobileUserID
                 )
             case "viewComponent":
                 return Condition(
@@ -306,7 +306,7 @@ class OperatorsManager: NSObject {
                     target: cond.value,
                     op: { val in opFn(val, cond.value) },
                     type: cond.type,
-                    tp: ORMessageType.iOSViewComponentEvent
+                    tp: ORMessageType.mobileViewComponentEvent
                 )
             case "clickEvent":
                 return Condition(
@@ -314,7 +314,7 @@ class OperatorsManager: NSObject {
                     target: cond.value,
                     op: { val in opFn(val, cond.value) },
                     type: cond.type,
-                    tp: ORMessageType.iOSClickEvent
+                    tp: ORMessageType.mobileClickEvent
                 )
             case "logEvent":
                 return Condition(
@@ -322,7 +322,7 @@ class OperatorsManager: NSObject {
                     target: cond.value,
                     op: { val in opFn(val, cond.value) },
                     type: cond.type,
-                    tp: ORMessageType.iOSLog
+                    tp: ORMessageType.mobileLog
                 )
             case "fetchUrl", "fetchStatusCode", "fetchMethod", "fetchDuration":
                 return Condition(
@@ -330,7 +330,7 @@ class OperatorsManager: NSObject {
                     target: cond.value,
                     op: { val in opFn(val, cond.value) },
                     type: cond.type,
-                    tp: ORMessageType.iOSNetworkCall
+                    tp: ORMessageType.mobileNetworkCall
                 )
             case "thermalState", "mainThreadCpu", "memoryUsage":
                 return Condition(
@@ -338,7 +338,7 @@ class OperatorsManager: NSObject {
                     target: cond.value,
                     op: { val in opFn(val, cond.value) },
                     type: cond.type,
-                    tp: ORMessageType.iOSPerformanceEvent
+                    tp: ORMessageType.mobilePerformanceEvent
                 )
             default:
                 return nil

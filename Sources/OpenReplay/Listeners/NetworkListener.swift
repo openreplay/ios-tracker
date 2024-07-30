@@ -117,7 +117,7 @@ func convertDictionaryToJSONString(dictionary: [String: Any?]) -> String? {
 }
 
 public func sendNetworkMessage(url: String, method: String, requestJSON: String, responseJSON: String, status: Int, duration: UInt64) {
-    let message = ORIOSNetworkCall(
+    let message = ORMobileNetworkCall(
         type: "request",
         method: method,
         URL: url,

@@ -158,7 +158,7 @@ open class Openreplay: NSObject {
     }
     
     @objc open func setMetadata(key: String, value: String) {
-        let message = ORIOSMetadata(key: key, value: value)
+        let message = ORMobileMetadata(key: key, value: value)
         MessageCollector.shared.sendMessage(message)
     }
 
@@ -173,22 +173,22 @@ open class Openreplay: NSObject {
            let jsonStr = String(data: data, encoding: .utf8) {
             json = jsonStr
         }
-        let message = ORIOSEvent(name: name, payload: json)
+        let message = ORMobileEvent(name: name, payload: json)
         MessageCollector.shared.sendMessage(message)
     }
     
     open func eventStr(name: String, payload: String?) {
-        let message = ORIOSEvent(name: name, payload: payload ?? "")
+        let message = ORMobileEvent(name: name, payload: payload ?? "")
         MessageCollector.shared.sendMessage(message)
     }
 
     @objc open func setUserID(_ userID: String) {
-        let message = ORIOSUserID(iD: userID)
+        let message = ORMobileUserID(iD: userID)
         MessageCollector.shared.sendMessage(message)
     }
 
     @objc open func userAnonymousID(_ userID: String) {
-        let message = ORIOSUserAnonymousID(iD: userID)
+        let message = ORMobileUserAnonymousID(iD: userID)
         MessageCollector.shared.sendMessage(message)
     }
     

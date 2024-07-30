@@ -20,7 +20,8 @@ class MessageCollector: NSObject {
     private var bufferTimer: Timer?
     private var catchUpTimer: Timer?
     private var tick = 0
-    
+    private let queue = DispatchQueue(label: "com.messageCollector.queue", attributes: .concurrent)
+
     override init() {
         lateMessagesFile = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("/lateMessages.dat")
         super.init()
@@ -138,7 +139,7 @@ class MessageCollector: NSObject {
             if !message.description.contains("IOSLog") && !message.description.contains("IOSNetworkCall") {
                 DebugUtils.log(message.description)
             }
-            if let networkCallMessage = message as? ORIOSNetworkCall {
+            if let networkCallMessage = message as? ORMobileNetworkCall {
                 DebugUtils.log("-->> IOSNetworkCall(105): \(networkCallMessage.method) \(networkCallMessage.URL)")
             }
         }
@@ -161,53 +162,59 @@ class MessageCollector: NSObject {
 
     func sendRawMessage(_ data: Data) {
         messagesQueue.addOperation {
-            if data.count > self.maxMessagesSize {
-                DebugUtils.log("<><><>Single message size exceeded limit")
-                return
-            }
-            self.messagesWaiting.append(data)
-            if Openreplay.shared.bufferingMode {
-                self.messagesWaitingBackup.append(data)
-            }
-            var totalWaitingSize = 0
-            self.messagesWaiting.forEach { totalWaitingSize += $0.count }
-            if !Openreplay.shared.bufferingMode && totalWaitingSize > Int(Double(self.maxMessagesSize) * 0.8) {
-                self.flushMessages()
+            self.queue.async(flags: .barrier) {
+                if data.count > self.maxMessagesSize {
+                    DebugUtils.log("<><><>Single message size exceeded limit")
+                    return
+                }
+                self.messagesWaiting.append(data)
+                if Openreplay.shared.bufferingMode {
+                    self.messagesWaitingBackup.append(data)
+                }
+                var totalWaitingSize = 0
+                self.messagesWaiting.forEach { totalWaitingSize += $0.count }
+                if !Openreplay.shared.bufferingMode && totalWaitingSize > Int(Double(self.maxMessagesSize) * 0.8) {
+                    self.flushMessages()
+                }
             }
         }
     }
 
     private func flushMessages() {
-        var messages = [Data]()
-        var sentSize = 0
-        while let message = messagesWaiting.first, sentSize + message.count <= maxMessagesSize {
-            messages.append(message)
-            messagesWaiting.remove(at: 0)
-            sentSize += message.count
-        }
-        guard !messages.isEmpty else { return }
-        var content = Data()
-        let index = ORIOSBatchMeta(firstIndex: UInt64(nextMessageIndex))
-        content.append(index.contentData())
-        DebugUtils.log(index.description)
-        messages.forEach { (message) in
-            content.append(message)
-        }
-        if sendingLastMessages, let fileUrl = lateMessagesFile {
-            try? content.write(to: fileUrl)
-        }
-        nextMessageIndex += messages.count
-        DebugUtils.log("messages batch \(content)")
-        NetworkManager.shared.sendMessage(content: content) { (success) in
-            guard success else {
-                DebugUtils.log("<><>re-sending failed batch<><>")
-                self.messagesWaiting.insert(contentsOf: messages, at: 0)
-                return
+        queue.async(flags: .barrier) {
+            var messages = [Data]()
+            var sentSize = 0
+            while let message = self.messagesWaiting.first, sentSize + message.count <= self.maxMessagesSize {
+                messages.append(message)
+                self.messagesWaiting.remove(at: 0)
+                sentSize += message.count
             }
-            if self.sendingLastMessages {
-                self.sendingLastMessages = false
-                if let fileUrl = self.lateMessagesFile, FileManager.default.fileExists(atPath: fileUrl.path) {
-                    try? FileManager.default.removeItem(at: fileUrl)
+            guard !messages.isEmpty else { return }
+            var content = Data()
+            let index = ORMobileBatchMeta(firstIndex: UInt64(self.nextMessageIndex))
+            content.append(index.contentData())
+            DebugUtils.log(index.description)
+            messages.forEach { (message) in
+                content.append(message)
+            }
+            if self.sendingLastMessages, let fileUrl = self.lateMessagesFile {
+                try? content.write(to: fileUrl)
+            }
+            self.nextMessageIndex += messages.count
+            DebugUtils.log("messages batch \(content)")
+            NetworkManager.shared.sendMessage(content: content) { (success) in
+                guard success else {
+                    DebugUtils.log("<><>re-sending failed batch<><>")
+                    self.queue.async(flags: .barrier) {
+                        self.messagesWaiting.insert(contentsOf: messages, at: 0)
+                    }
+                    return
+                }
+                if self.sendingLastMessages {
+                    self.sendingLastMessages = false
+                    if let fileUrl = self.lateMessagesFile, FileManager.default.fileExists(atPath: fileUrl.path) {
+                        try? FileManager.default.removeItem(at: fileUrl)
+                    }
                 }
             }
         }

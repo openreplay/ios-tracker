@@ -46,25 +46,25 @@ open class PerformanceListener: NSObject {
         }
         getCpuMessage()
         getMemoryMessage()
-        MessageCollector.shared.sendMessage(ORIOSPerformanceEvent(name: "background", value: UInt64(0)))
+        MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "background", value: UInt64(0)))
     }
     
     @objc func pause() {
         if (Openreplay.shared.options.debugLogs) {
             DebugUtils.log("Background")
         }
-        MessageCollector.shared.sendMessage(ORIOSPerformanceEvent(name: "background", value: UInt64(1)))
+        MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "background", value: UInt64(1)))
     }
     
     func getCpuMessage() {
         if let cpu = self.cpuUsage() {
-            MessageCollector.shared.sendMessage(ORIOSPerformanceEvent(name: "mainThreadCPU", value: UInt64(cpu)))
+            MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "mainThreadCPU", value: UInt64(cpu)))
         }
     }
     
     func getMemoryMessage() {
         if let mem = self.memoryUsage() {
-            MessageCollector.shared.sendMessage(ORIOSPerformanceEvent(name: "memoryUsage", value: UInt64(mem)))
+            MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "memoryUsage", value: UInt64(mem)))
         }
     }
     
@@ -93,33 +93,33 @@ open class PerformanceListener: NSObject {
     }
     
     public func sendBattery() {
-        let message = ORIOSPerformanceEvent(name: "batteryLevel", value: 20)
+        let message = ORMobilePerformanceEvent(name: "batteryLevel", value: 20)
         
         MessageCollector.shared.sendMessage(message)
     }
     
     public func sendThermal() {
-        let message2 = ORIOSPerformanceEvent(name: "thermalState", value: 2)
+        let message2 = ORMobilePerformanceEvent(name: "thermalState", value: 2)
         MessageCollector.shared.sendMessage(message2)
     }
 
     @objc func notified(_ notification: Notification) {
-        var message: ORIOSPerformanceEvent? = nil
+        var message: ORMobilePerformanceEvent? = nil
         switch notification.name {
         case .NSBundleResourceRequestLowDiskSpace:
-            message = ORIOSPerformanceEvent(name: "lowDiskSpace", value: 0)
+            message = ORMobilePerformanceEvent(name: "lowDiskSpace", value: 0)
         case .NSProcessInfoPowerStateDidChange:
-            message = ORIOSPerformanceEvent(name: "isLowPowerModeEnabled", value: ProcessInfo.processInfo.isLowPowerModeEnabled ? 1 : 0)
+            message = ORMobilePerformanceEvent(name: "isLowPowerModeEnabled", value: ProcessInfo.processInfo.isLowPowerModeEnabled ? 1 : 0)
         case ProcessInfo.thermalStateDidChangeNotification:
-            message = ORIOSPerformanceEvent(name: "thermalState", value: UInt64(ProcessInfo.processInfo.thermalState.rawValue)) 
+            message = ORMobilePerformanceEvent(name: "thermalState", value: UInt64(ProcessInfo.processInfo.thermalState.rawValue))
         case UIApplication.didReceiveMemoryWarningNotification:
-            message = ORIOSPerformanceEvent(name: "memoryWarning", value: 0)
+            message = ORMobilePerformanceEvent(name: "memoryWarning", value: 0)
         case UIDevice.batteryLevelDidChangeNotification:
-            message = ORIOSPerformanceEvent(name: "batteryLevel", value: UInt64(max(0.0, UIDevice.current.batteryLevel)*100))
+            message = ORMobilePerformanceEvent(name: "batteryLevel", value: UInt64(max(0.0, UIDevice.current.batteryLevel)*100))
         case UIDevice.batteryStateDidChangeNotification:
-            message = ORIOSPerformanceEvent(name: "batteryState", value: UInt64(UIDevice.current.batteryState.rawValue))
+            message = ORMobilePerformanceEvent(name: "batteryState", value: UInt64(UIDevice.current.batteryState.rawValue))
         case UIDevice.orientationDidChangeNotification:
-            message = ORIOSPerformanceEvent(name: "orientation", value: UInt64(UIDevice.current.orientation.rawValue))
+            message = ORMobilePerformanceEvent(name: "orientation", value: UInt64(UIDevice.current.orientation.rawValue))
         default: break
         }
         if let message = message {
@@ -128,7 +128,7 @@ open class PerformanceListener: NSObject {
     }
     
     func networkStateChange(_ state: UInt64) {
-        let message = ORIOSPerformanceEvent(name: "networkState", value: state)
+        let message = ORMobilePerformanceEvent(name: "networkState", value: state)
         MessageCollector.shared.sendMessage(message)
     }
 

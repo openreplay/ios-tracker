@@ -26,7 +26,7 @@ class LogsListener: NSObject {
 
                 let data = fileHandle.availableData
                 if let string = String(data: data, encoding: String.Encoding.utf8) {
-                    let message = ORIOSLog(severity: severity, content: string)
+                    let message = ORMobileLog(severity: severity, content: string)
                     MessageCollector.shared.sendMessage(message)
                 }
 
