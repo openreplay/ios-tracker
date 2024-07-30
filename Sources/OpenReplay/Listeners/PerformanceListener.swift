@@ -6,6 +6,8 @@ open class PerformanceListener: NSObject {
     private var cpuIteration = 0
     private var memTimer: Timer?
     public var isActive = false
+    private var pauseTimer: Timer?
+    private var wasPaused = false
     
     func start() {
 //         #warning("Can interfere with client usage")
@@ -41,19 +43,92 @@ open class PerformanceListener: NSObject {
     }
     
     @objc func resume() {
+        pauseTimer?.invalidate()
+        pauseTimer = nil
+        
         if (Openreplay.shared.options.debugLogs) {
             DebugUtils.log("Resume")
         }
         getCpuMessage()
         getMemoryMessage()
         MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "background", value: UInt64(0)))
+        
+        if wasPaused {
+            if Openreplay.shared.options.logs {
+                LogsListener.shared.start()
+            }
+            
+            if Openreplay.shared.options.crashes {
+                Crashs.shared.start()
+            }
+            
+            if Openreplay.shared.options.performances {
+                PerformanceListener.shared.start()
+            }
+            
+            if Openreplay.shared.options.screen {
+                ScreenshotManager.shared.start(startTs: Openreplay.shared.sessionStartTs)
+            }
+            
+            if Openreplay.shared.options.analytics {
+                Analytics.shared.start()
+            }
+            
+            MessageCollector.shared.start()
+            
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            
+            let observe: (Notification.Name) -> Void = {
+                NotificationCenter.default.addObserver(self, selector: #selector(self.notified(_:)), name: $0, object: nil)
+            }
+            observe(.NSBundleResourceRequestLowDiskSpace)
+            observe(.NSProcessInfoPowerStateDidChange)
+            observe(ProcessInfo.thermalStateDidChangeNotification)
+            observe(UIApplication.didReceiveMemoryWarningNotification)
+            observe(UIDevice.batteryLevelDidChangeNotification)
+            observe(UIDevice.batteryStateDidChangeNotification)
+            observe(UIDevice.orientationDidChangeNotification)
+
+            getCpuMessage()
+            getMemoryMessage()
+            
+            cpuTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true, block: { (_) in
+                self.getCpuMessage()
+            })
+
+            memTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true, block: { (_) in
+                self.getMemoryMessage()
+            })
+            isActive = true
+            
+            wasPaused = false
+        }
     }
     
     @objc func pause() {
-        if (Openreplay.shared.options.debugLogs) {
-            DebugUtils.log("Background")
+            if (Openreplay.shared.options.debugLogs) {
+                DebugUtils.log("Background")
+            }
+            MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "background", value: UInt64(1)))
+            
+            // Invalidate existing pause timer if any
+            pauseTimer?.invalidate() // START GEN
+            pauseTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: false, block: { [weak self] _ in
+                guard let self = self else { return }
+                self.pauseOperations() // END GEN
+            })
         }
-        MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "background", value: UInt64(1)))
+    
+    private func pauseOperations() {
+        MessageCollector.shared.stop()
+        ScreenshotManager.shared.stop()
+        Crashs.shared.stop()
+        PerformanceListener.shared.stop()
+        Analytics.shared.stop()
+        self.stopTrackingMethods()
+        wasPaused = true
+
     }
     
     func getCpuMessage() {
@@ -68,26 +143,28 @@ open class PerformanceListener: NSObject {
         }
     }
     
+    func stopTrackingMethods() {
+        UIDevice.current.isBatteryMonitoringEnabled = false
+        UIDevice.current.endGeneratingDeviceOrientationNotifications()
+
+        NotificationCenter.default.removeObserver(self, name: .NSBundleResourceRequestLowDiskSpace, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .NSProcessInfoPowerStateDidChange, object: nil)
+        NotificationCenter.default.removeObserver(self, name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIDevice.batteryLevelDidChangeNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIDevice.batteryStateDidChangeNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIDevice.orientationDidChangeNotification, object: nil)
+        cpuTimer?.invalidate()
+        cpuTimer = nil
+        memTimer?.invalidate()
+        memTimer = nil
+    }
+    
     func stop() {
         if isActive {
-            UIDevice.current.isBatteryMonitoringEnabled = false
-            UIDevice.current.endGeneratingDeviceOrientationNotifications()
-
-            NotificationCenter.default.removeObserver(self, name: .NSBundleResourceRequestLowDiskSpace, object: nil)
-            NotificationCenter.default.removeObserver(self, name: .NSProcessInfoPowerStateDidChange, object: nil)
-            NotificationCenter.default.removeObserver(self, name: ProcessInfo.thermalStateDidChangeNotification, object: nil)
-            NotificationCenter.default.removeObserver(self, name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
-            NotificationCenter.default.removeObserver(self, name: UIDevice.batteryLevelDidChangeNotification, object: nil)
-            NotificationCenter.default.removeObserver(self, name: UIDevice.batteryStateDidChangeNotification, object: nil)
-            NotificationCenter.default.removeObserver(self, name: UIDevice.orientationDidChangeNotification, object: nil)
+            self.stopTrackingMethods()
             NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
             NotificationCenter.default.removeObserver(self, name: UIApplication.willEnterForegroundNotification, object: nil)
-            
-            cpuTimer?.invalidate()
-            cpuTimer = nil
-            memTimer?.invalidate()
-            memTimer = nil
-            
             isActive = false
         }
     }
