@@ -135,18 +135,19 @@ public class TouchTrackingWindow: UIWindow {
             case .began:
                 touchStart = touch.location(in: self)
             case .ended:
+                guard let touchStart else { return }
                 let location = touch.location(in: self)
-                let isSwipe = touchStart!.distance(to: location) > 10
+                let isSwipe = touchStart.distance(to: location) > 10
                 var event: ORMessage
                 let description = getViewDescription(touch.view) ?? "UIView"
                 if isSwipe {
-                    DebugUtils.log("Swipe from \(touchStart ?? CGPoint(x: 0, y: 0)) to \(location)")
-                    event = ORMobileSwipeEvent(label: description, x: UInt64(location.x),y: UInt64(location.y), direction: detectSwipeDirection(from: touchStart!, to: location))
+                    DebugUtils.log("Swipe from \(touchStart) to \(location)")
+                    event = ORMobileSwipeEvent(label: description, x: UInt64(location.x),y: UInt64(location.y), direction: detectSwipeDirection(from: touchStart, to: location))
                 } else {
                     event = ORMobileClickEvent(label: description, x: UInt64(location.x), y: UInt64(location.y))
-                    DebugUtils.log("Touch from \(touchStart ?? CGPoint(x: 0, y: 0)) to \(location)")
+                    DebugUtils.log("Touch from \(touchStart) to \(location)")
                 }
-                touchStart = nil
+                self.touchStart = nil
                 MessageCollector.shared.sendMessage(event)
             default:
                 break
