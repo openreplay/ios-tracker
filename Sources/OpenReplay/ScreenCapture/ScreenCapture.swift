@@ -71,8 +71,10 @@ open class ScreenshotManager {
 
     // MARK: - UI Capturing
     func takeScreenshot() {
-        let window = UIApplication.shared.windows.first { $0.isKeyWindow }
-        let size = window?.frame.size ?? CGSize.zero
+        guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else { return }
+        let size = window.frame.size
+      
+        guard size != .zero else { return }
         UIGraphicsBeginImageContextWithOptions(size, false, screenScale)
         guard let context = UIGraphicsGetCurrentContext() else { return }
 
@@ -80,7 +82,7 @@ open class ScreenshotManager {
         // 2nd option looks to be more precise
 //      window?.layer.render(in: context)
 //         #warning("Can slow down the app depending on complexity of the UI tree")
-        window?.drawHierarchy(in: window?.bounds ?? CGRect.zero, afterScreenUpdates: false)
+        window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
         
         // MARK: sanitize
         // Sanitizing sensitive elements
