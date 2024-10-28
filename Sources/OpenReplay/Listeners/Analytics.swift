@@ -129,7 +129,7 @@ public class TouchTrackingWindow: UIWindow {
         super.sendEvent(event)
         
         guard let touches = event.allTouches else { return }
-    
+        
         for touch in touches {
             switch touch.phase {
             case .began:
@@ -140,11 +140,26 @@ public class TouchTrackingWindow: UIWindow {
                 let isSwipe = touchStart.distance(to: location) > 10
                 var event: ORMessage
                 let description = getViewDescription(touch.view) ?? "UIView"
+                
+                // Clamp the coordinate to a minimum of 0 to ensure it can
+                // safely be converted to UInt64 without negative values
+                let locationX = max(location.x, 0)
+                let locationY = max(location.y, 0)
+                
                 if isSwipe {
                     DebugUtils.log("Swipe from \(touchStart) to \(location)")
-                    event = ORMobileSwipeEvent(label: description, x: UInt64(location.x),y: UInt64(location.y), direction: detectSwipeDirection(from: touchStart, to: location))
+                    event = ORMobileSwipeEvent(
+                        label: description,
+                        x: UInt64(locationX),
+                        y: UInt64(locationY),
+                        direction: detectSwipeDirection(from: touchStart, to: location)
+                    )
                 } else {
-                    event = ORMobileClickEvent(label: description, x: UInt64(location.x), y: UInt64(location.y))
+                    event = ORMobileClickEvent(
+                        label: description,
+                        x: UInt64(locationX),
+                        y: UInt64(locationY)
+                    )
                     DebugUtils.log("Touch from \(touchStart) to \(location)")
                 }
                 self.touchStart = nil
@@ -154,7 +169,6 @@ public class TouchTrackingWindow: UIWindow {
             }
         }
     }
-    
     
     private func getViewDescription(_ view: UIView?) -> String? {
         guard let view = view else {
