@@ -195,7 +195,9 @@ class MessageCollector: NSObject {
             content.append(index.contentData())
             DebugUtils.log(index.description)
             messages.forEach { (message) in
+              if !message.isEmpty {
                 content.append(message)
+              }
             }
             if self.sendingLastMessages, let fileUrl = self.lateMessagesFile {
                 try? content.write(to: fileUrl)
