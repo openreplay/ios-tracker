@@ -152,7 +152,7 @@ open class ScreenshotManager {
                     self.screenshotsBackup.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
                 }
                 screenshots.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
-                if !openReplay.bufferingMode && screenshots.count >= openReplay.options.minScreenCount {
+                if !openReplay.bufferingMode && screenshots.count >= openReplay.options.screenshotBatchSize.rawValue {
                     self.sendScreenshots()
                 }
             }
