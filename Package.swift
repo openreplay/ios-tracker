@@ -20,14 +20,11 @@ let package = Package(
         .package(url: "https://github.com/tsolomko/SWCompression.git", .upToNextMajor(from: "4.8.5")),
     ],
     targets: [
-        // Targets are the basic building blocks of a package. A target can define a module or a test suite.
-        // Targets can depend on other targets in this package, and on products in packages this package depends on.
         .target(
             name: "OpenReplay",
             dependencies: [
                 .product(name: "SWCompression", package: "SWCompression"),
                 .product(name: "DeviceKit", package: "DeviceKit"),
-                
             ]
         ),
         .testTarget(
