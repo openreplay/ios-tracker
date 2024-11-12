@@ -129,31 +129,46 @@ public class TouchTrackingWindow: UIWindow {
         super.sendEvent(event)
         
         guard let touches = event.allTouches else { return }
-    
+        
         for touch in touches {
             switch touch.phase {
             case .began:
                 touchStart = touch.location(in: self)
             case .ended:
+                guard let touchStart else { return }
                 let location = touch.location(in: self)
-                let isSwipe = touchStart!.distance(to: location) > 10
+                let isSwipe = touchStart.distance(to: location) > 10
                 var event: ORMessage
                 let description = getViewDescription(touch.view) ?? "UIView"
+                
+                // Clamp the coordinate to a minimum of 0 to ensure it can
+                // safely be converted to UInt64 without negative values
+                let locationX = max(location.x, 0)
+                let locationY = max(location.y, 0)
+                
                 if isSwipe {
-                    DebugUtils.log("Swipe from \(touchStart ?? CGPoint(x: 0, y: 0)) to \(location)")
-                    event = ORMobileSwipeEvent(label: description, x: UInt64(location.x),y: UInt64(location.y), direction: detectSwipeDirection(from: touchStart!, to: location))
+                    DebugUtils.log("Swipe from \(touchStart) to \(location)")
+                    event = ORMobileSwipeEvent(
+                        label: description,
+                        x: UInt64(locationX),
+                        y: UInt64(locationY),
+                        direction: detectSwipeDirection(from: touchStart, to: location)
+                    )
                 } else {
-                    event = ORMobileClickEvent(label: description, x: UInt64(location.x), y: UInt64(location.y))
-                    DebugUtils.log("Touch from \(touchStart ?? CGPoint(x: 0, y: 0)) to \(location)")
+                    event = ORMobileClickEvent(
+                        label: description,
+                        x: UInt64(locationX),
+                        y: UInt64(locationY)
+                    )
+                    DebugUtils.log("Touch from \(touchStart) to \(location)")
                 }
-                touchStart = nil
+                self.touchStart = nil
                 MessageCollector.shared.sendMessage(event)
             default:
                 break
             }
         }
     }
-    
     
     private func getViewDescription(_ view: UIView?) -> String? {
         guard let view = view else {

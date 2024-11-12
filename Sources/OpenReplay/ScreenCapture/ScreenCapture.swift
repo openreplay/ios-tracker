@@ -27,6 +27,7 @@ open class ScreenshotManager {
     // we also can use default UIScreen.main.scale which is around 3.0 (dense pixel screen)
     private var screenScale = 1.25
     private var settings: (captureRate: Double, imgCompression: Double) = (captureRate: 0.33, imgCompression: 0.5)
+    private var openReplay = Openreplay.shared
     
     private init() { }
 
@@ -55,14 +56,14 @@ open class ScreenshotManager {
     }
 
     public func addSanitizedElement(_ element: Sanitizable) {
-        if (Openreplay.shared.options.debugLogs) {
+        if (openReplay.options.debugLogs) {
             DebugUtils.log("addSanitizedElement")
         }
         sanitizedElements.append(element)
     }
 
     public func removeSanitizedElement(_ element: Sanitizable) {
-        if (Openreplay.shared.options.debugLogs) {
+        if (openReplay.options.debugLogs) {
             DebugUtils.log("removeSanitizedElement")
         }
         sanitizedElements.removeAll { $0 as AnyObject === element as AnyObject }
@@ -70,8 +71,10 @@ open class ScreenshotManager {
 
     // MARK: - UI Capturing
     func takeScreenshot() {
-        let window = UIApplication.shared.windows.first { $0.isKeyWindow }
-        let size = window?.frame.size ?? CGSize.zero
+        guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else { return }
+        let size = window.frame.size
+      
+        guard size != .zero else { return }
         UIGraphicsBeginImageContextWithOptions(size, false, screenScale)
         guard let context = UIGraphicsGetCurrentContext() else { return }
 
@@ -79,7 +82,7 @@ open class ScreenshotManager {
         // 2nd option looks to be more precise
 //      window?.layer.render(in: context)
 //         #warning("Can slow down the app depending on complexity of the UI tree")
-        window?.drawHierarchy(in: window?.bounds ?? CGRect.zero, afterScreenUpdates: false)
+        window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
         
         // MARK: sanitize
         // Sanitizing sensitive elements
@@ -123,7 +126,7 @@ open class ScreenshotManager {
                         context.strokePath()
                         context.restoreGState()
                         
-                        if (Openreplay.shared.options.debugImages) {
+                        if (openReplay.options.debugImages) {
                             context.setStrokeColor(UIColor.black.cgColor)
                             context.setLineWidth(1)
                             context.stroke(convertedFrame)
@@ -145,11 +148,11 @@ open class ScreenshotManager {
         // Get the resulting image
         if let image = UIGraphicsGetImageFromCurrentImageContext() {
             if let compressedData = image.jpegData(compressionQuality: self.settings.imgCompression) {
-                if (Openreplay.shared.bufferingMode) {
+                if (openReplay.bufferingMode) {
                     self.screenshotsBackup.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
                 }
                 screenshots.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
-                if !Openreplay.shared.bufferingMode && screenshots.count >= 20 {
+                if !openReplay.bufferingMode && screenshots.count >= openReplay.options.screenshotBatchSize.rawValue {
                     self.sendScreenshots()
                 }
             }
