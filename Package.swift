@@ -16,7 +16,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/devicekit/DeviceKit.git", from: "4.0.0"),
+        .package(url: "https://github.com/devicekit/DeviceKit.git", from: "5.5.0"),
         .package(url: "https://github.com/tsolomko/SWCompression.git", .upToNextMajor(from: "4.8.5")),
     ],
     targets: [

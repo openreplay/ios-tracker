@@ -11,7 +11,8 @@ open class Openreplay: NSObject {
     @objc public static let shared = Openreplay()
     public let userDefaults = UserDefaults(suiteName: "io.asayer.AsayerSDK-defaults")
     public var projectKey: String?
-    public var pkgVersion = "1.1.10"
+    public var pkgVersion = "1.0.14"
+    private var sessionData: ORSessionResponse?
     public var sessionStartTs: UInt64 = 0
     public var trackerState = CheckState.unchecked
     private var networkCheckTimer: Timer?
@@ -68,6 +69,7 @@ open class Openreplay: NSObject {
         ORSessionRequest.create(doNotRecord: false) { sessionResponse in
             guard let sessionResponse = sessionResponse else { return print("Openreplay: no response from /start request") }
             self.sessionStartTs = UInt64(Date().timeIntervalSince1970 * 1000)
+            self.sessionData = sessionResponse
             let captureSettings = getCaptureSettings(fps: 3, quality: "high") // getCaptureSettings(fps: sessionResponse.fps, quality: sessionResponse.quality)
             ScreenshotManager.shared.setSettings(settings: captureSettings)
             
@@ -102,6 +104,7 @@ open class Openreplay: NSObject {
         ORSessionRequest.create(doNotRecord: true) { sessionResponse in
             guard let sessionResponse = sessionResponse else { return print("Openreplay: no response from /start request") }
             self.sessionStartTs = UInt64(Date().timeIntervalSince1970 * 1000)
+            self.sessionData = sessionResponse
             ConditionsManager.shared.getConditions(projectId: sessionResponse.projectID, token: sessionResponse.token)
             let captureSettings = getCaptureSettings(fps: sessionResponse.fps, quality: sessionResponse.quality)
 
@@ -194,6 +197,14 @@ open class Openreplay: NSObject {
     
     @objc open func networkRequest(url: String, method: String, requestJSON: String, responseJSON: String, status: Int, duration: UInt64) {
         sendNetworkMessage(url: url, method: method, requestJSON: requestJSON, responseJSON: responseJSON, status: status, duration: duration)
+    }
+    
+    @objc open func getSessionID() -> String {
+        if let sessionId = self.sessionData?.sessionID {
+            return sessionId
+        } else {
+            return ""
+        }
     }
 }
 
