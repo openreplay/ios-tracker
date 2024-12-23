@@ -76,7 +76,11 @@ open class Openreplay: NSObject {
             MessageCollector.shared.start()
             
             if options.logs {
-                LogsListener.shared.start()
+                if #available(iOS 13.4, *) {
+                    LogsListener.shared.start()
+                } else {
+                    // Fallback on earlier versions
+                }
             }
             
             if options.crashes {
@@ -111,7 +115,11 @@ open class Openreplay: NSObject {
             MessageCollector.shared.cycleBuffer()
 
             if options.logs {
-                LogsListener.shared.start()
+                if #available(iOS 13.4, *) {
+                    LogsListener.shared.start()
+                } else {
+                    // Fallback on earlier versions
+                }
             }
             
             if options.crashes {

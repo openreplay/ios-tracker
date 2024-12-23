@@ -81,6 +81,7 @@ class MessageCollector: NSObject {
     }
     
     func stop() {
+        DebugUtils.log("stopping sender")
         sendInterval?.invalidate()
         NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIApplication.willTerminateNotification,  object: nil)
@@ -161,6 +162,10 @@ class MessageCollector: NSObject {
     }
 
     func sendRawMessage(_ data: Data) {
+        if self.messagesWaiting.count >= 10_000 {
+            DebugUtils.log("Message queue size exceeded, dropping message")
+            return
+        }
         messagesQueue.addOperation {
             self.queue.async(flags: .barrier) {
                 if data.count > self.maxMessagesSize {
@@ -171,8 +176,7 @@ class MessageCollector: NSObject {
                 if Openreplay.shared.bufferingMode {
                     self.messagesWaitingBackup.append(data)
                 }
-                var totalWaitingSize = 0
-                self.messagesWaiting.forEach { totalWaitingSize += $0.count }
+                let totalWaitingSize = self.messagesWaiting.reduce(0) { $0 + $1.count }
                 if !Openreplay.shared.bufferingMode && totalWaitingSize > Int(Double(self.maxMessagesSize) * 0.8) {
                     self.flushMessages()
                 }
@@ -182,6 +186,8 @@ class MessageCollector: NSObject {
 
     private func flushMessages() {
         queue.async(flags: .barrier) {
+            guard !self.messagesWaiting.isEmpty else { return }
+            
             var messages = [Data]()
             var sentSize = 0
             while let message = self.messagesWaiting.first, sentSize + message.count <= self.maxMessagesSize {
@@ -189,7 +195,9 @@ class MessageCollector: NSObject {
                 self.messagesWaiting.remove(at: 0)
                 sentSize += message.count
             }
+            
             guard !messages.isEmpty else { return }
+            
             var content = Data()
             let index = ORMobileBatchMeta(firstIndex: UInt64(self.nextMessageIndex))
             content.append(index.contentData())

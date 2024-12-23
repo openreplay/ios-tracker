@@ -10,7 +10,7 @@ class DebugUtils: NSObject {
 
     static func log(_ str: String) {
         if (Openreplay.shared.options.debugLogs) {
-         print(str)
+         print("OpenReplay: \(str)")
         }
     }
 }

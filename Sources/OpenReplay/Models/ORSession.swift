@@ -37,6 +37,9 @@ class ORSessionRequest: NSObject {
                 deviceModel = Device.identifier
             }
             
+            let screenWidth = UIScreen.main.bounds.width
+            let screenHeight = UIScreen.main.bounds.height
+            
             DebugUtils.log(">>>> device \(device) type \(device.safeDescription) mem \(UInt64(ProcessInfo.processInfo.physicalMemory / 1024))")
             params = [
                 "doNotRecord": doNotRecord,
@@ -51,6 +54,8 @@ class ORSessionRequest: NSObject {
                 "performances": performances,
                 "deviceMemory": UInt64(ProcessInfo.processInfo.physicalMemory / 1024),
                 "timezone": getTimezone(),
+                "width": screenWidth,
+                "height": screenHeight,
             ]
             callAPI(completion: completion)
         }

@@ -10,6 +10,7 @@ open class PerformanceListener: NSObject {
     private var wasPaused = false
     
     func start() {
+        guard !isActive else { return }
 //         #warning("Can interfere with client usage")
         UIDevice.current.isBatteryMonitoringEnabled = true
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -28,34 +29,38 @@ open class PerformanceListener: NSObject {
         getCpuMessage()
         getMemoryMessage()
         
-        cpuTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true, block: { (_) in
-            self.getCpuMessage()
-        })
-
-        memTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true, block: { (_) in
-            self.getMemoryMessage()
-        })
+        self.setupTimers()
         isActive = true
         
         
         NotificationCenter.default.addObserver(self, selector: #selector(pause), name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(resume), name: UIApplication.willEnterForegroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(resume), name: UIApplication.didBecomeActiveNotification, object: nil)
     }
     
+    private var resuming = false
     @objc func resume() {
+        guard !self.resuming else { return }
+        self.resuming = true
+        defer { self.resuming = false }
+        
         pauseTimer?.invalidate()
         pauseTimer = nil
         
-        if (Openreplay.shared.options.debugLogs) {
-            DebugUtils.log("Resume")
-        }
+        DebugUtils.log("Resume \(wasPaused)")
         getCpuMessage()
+        DebugUtils.log("sent cpu")
         getMemoryMessage()
+        DebugUtils.log("sent mem")
         MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "background", value: UInt64(0)))
-        
+        DebugUtils.log("stsarting stuff")
         if wasPaused {
             if Openreplay.shared.options.logs {
-                LogsListener.shared.start()
+                if #available(iOS 13.4, *) {
+                    LogsListener.shared.start()
+                } else {
+                    // Fallback on earlier versions
+                }
             }
             
             if Openreplay.shared.options.crashes {
@@ -74,6 +79,7 @@ open class PerformanceListener: NSObject {
                 Analytics.shared.start()
             }
             
+            DebugUtils.log("Resume collector")
             MessageCollector.shared.start()
             
             UIDevice.current.isBatteryMonitoringEnabled = true
@@ -90,49 +96,75 @@ open class PerformanceListener: NSObject {
             observe(UIDevice.batteryStateDidChangeNotification)
             observe(UIDevice.orientationDidChangeNotification)
 
+            DebugUtils.log("getting profiling")
             getCpuMessage()
             getMemoryMessage()
             
-            cpuTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true, block: { (_) in
-                self.getCpuMessage()
-            })
-
-            memTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true, block: { (_) in
-                self.getMemoryMessage()
-            })
+            self.setupTimers()
             isActive = true
             
+            DebugUtils.log("done")
             wasPaused = false
+        }
+        self.resuming = false
+    }
+    
+    private func setupTimers() {
+        cpuTimer?.invalidate()
+        cpuTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true, block: { _ in
+            self.getCpuMessage()
+        })
+
+        memTimer?.invalidate()
+        memTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true, block: { _ in
+            self.getMemoryMessage()
+        })
+    }
+    
+    var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    @objc func pause() {
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "PauseOperations") {
+            self.endBackgroundTask()
+        }
+        DebugUtils.log("Entering Background")
+        MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "background", value: UInt64(1)))
+        pauseOperations {
+            self.endBackgroundTask()
         }
     }
     
-    @objc func pause() {
-            if (Openreplay.shared.options.debugLogs) {
-                DebugUtils.log("Background")
-            }
-            MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "background", value: UInt64(1)))
-            
-            // Invalidate existing pause timer if any
-            pauseTimer?.invalidate() // START GEN
-            pauseTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: false, block: { [weak self] _ in
-                guard let self = self else { return }
-                self.pauseOperations() // END GEN
-            })
+    private func endBackgroundTask() {
+        if backgroundTask != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTask)
+            backgroundTask = .invalid
         }
+    }
     
-    private func pauseOperations() {
+    private func pauseOperations(completion: (() -> Void)? = nil) {
         MessageCollector.shared.stop()
+        DebugUtils.log("messages stop")
         ScreenshotManager.shared.stop()
+        DebugUtils.log("screenshots stop")
         Crashs.shared.stop()
+        DebugUtils.log("crash stop")
         PerformanceListener.shared.stop()
+        DebugUtils.log("perf stop")
         Analytics.shared.stop()
+        DebugUtils.log("graphs stop")
         self.stopTrackingMethods()
+        DebugUtils.log("self stop")
+        if #available(iOS 13.4, *) {
+            LogsListener.shared.stop()
+        } else {
+            // Fallback on earlier versions
+        }
         wasPaused = true
-
+        completion?()
     }
     
     func getCpuMessage() {
         if let cpu = self.cpuUsage() {
+            DebugUtils.log("\(cpu)")
             MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "mainThreadCPU", value: UInt64(cpu)))
         }
     }
