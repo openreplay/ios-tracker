@@ -242,16 +242,8 @@ open class Openreplay: NSObject {
             }
             responseString = responseString.trimmingCharacters(in: .whitespacesAndNewlines)
 
-            let testOpKind = "query"
-            let testOpName = "queryName"
-            let testVariables = "testVars"
-            let testResp = "testResp"
-            let testDuration = 100
-            let testGqlMessage = ORGraphQL(operationKind: testOpKind, operationName: testOpName, variables: testVariables, response: testResp, duration: UInt64(testDuration))
             let gqlMessage = ORGraphQL(operationKind: operationKind, operationName: operationName, variables: variablesString, response: responseString, duration: duration)
-            let hexStr = testGqlMessage.contentData().hexString()
-            print(hexStr)
-            MessageCollector.shared.sendMessage(testGqlMessage)
+            MessageCollector.shared.sendMessage(gqlMessage)
         } else {
             print("Openreplay: Unknown msg type passed.")
         }
