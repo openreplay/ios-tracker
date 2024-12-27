@@ -50,6 +50,7 @@ open class Analytics: NSObject {
     
     @objc public func sendSwipe(label: String, x: UInt64, y: UInt64, direction: String) {
         let message = ORMobileSwipeEvent(label: label, x: x,y: y, direction: direction)
+        
         if Analytics.shared.enabled {
             MessageCollector.shared.sendMessage(message)
         }
