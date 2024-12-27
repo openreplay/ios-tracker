@@ -18,6 +18,7 @@ enum ORMessageType: UInt64 {
     case mobileNetworkCall = 105
     case mobileSwipeEvent = 106
     case mobileBatchMeta = 107
+    case graphQL = 89
 }
 
 class ORMobileMetadata: ORMessage {
@@ -494,6 +495,45 @@ class ORMobileBatchMeta: ORMessage {
 
     override var description: String {
         return "-->> MobileBatchMeta(107): timestamp:\(timestamp) firstIndex:\(firstIndex)";
+    }
+}
+
+class ORGraphQL: ORMessage {
+    let operationKind: String
+    let operationName: String
+    let variables: String
+    let response: String
+    let duration: UInt64
+
+    init(operationKind: String, operationName: String, variables: String, response: String, duration: UInt64) {
+        self.operationKind = operationKind
+        self.operationName = operationName
+        self.variables = variables
+        self.response = response
+        self.duration = duration
+        super.init(messageType: .graphQL)
+    }
+
+    override init?(genericMessage: GenericMessage) {
+      do {
+            var offset = 0
+            self.operationKind = try genericMessage.body.readString(offset: &offset)
+            self.operationName = try genericMessage.body.readString(offset: &offset)
+            self.variables = try genericMessage.body.readString(offset: &offset)
+            self.response = try genericMessage.body.readString(offset: &offset)
+            self.duration = try genericMessage.body.readPrimary(offset: &offset)
+            super.init(genericMessage: genericMessage)
+        } catch {
+            return nil
+        }
+    }
+
+    override func contentData() -> Data {
+        return Data(values: UInt64(89), timestamp, Data(values: operationKind, operationName, variables, response, duration))
+    }
+
+    override var description: String {
+        return "-->> GraphQL(89): timestamp:\(timestamp) operationKind:\(operationKind) operationName:\(operationName) variables:\(variables) response:\(response) duration:\(duration)";
     }
 }
 

@@ -164,7 +164,6 @@ open class PerformanceListener: NSObject {
     
     func getCpuMessage() {
         if let cpu = self.cpuUsage() {
-            DebugUtils.log("\(cpu)")
             MessageCollector.shared.sendMessage(ORMobilePerformanceEvent(name: "mainThreadCPU", value: UInt64(cpu)))
         }
     }

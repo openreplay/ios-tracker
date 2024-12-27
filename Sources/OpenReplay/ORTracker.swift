@@ -214,6 +214,48 @@ open class Openreplay: NSObject {
             return ""
         }
     }
+    
+    @objc open func sendMessage(_ type: String, _ msg: String) {
+        if type == "gql" {
+            guard let data = msg.data(using: .utf8),
+                  let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return
+            }
+
+            let operationKind = dict["operationKind"] as? String ?? ""
+            let operationName = dict["operationName"] as? String ?? ""
+            let duration = UInt64(dict["duration"] as? Int ?? 0)
+
+            var variablesString = ""
+            if let variablesObj = dict["variables"],
+               let variablesData = try? JSONSerialization.data(withJSONObject: variablesObj, options: []),
+               let jsonStr = String(data: variablesData, encoding: .utf8) {
+                variablesString = jsonStr
+            }
+            variablesString = variablesString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var responseString = ""
+            if let responseObj = dict["response"],
+               let responseData = try? JSONSerialization.data(withJSONObject: responseObj, options: []),
+               let jsonStr = String(data: responseData, encoding: .utf8) {
+                responseString = jsonStr
+            }
+            responseString = responseString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let testOpKind = "query"
+            let testOpName = "queryName"
+            let testVariables = "testVars"
+            let testResp = "testResp"
+            let testDuration = 100
+            let testGqlMessage = ORGraphQL(operationKind: testOpKind, operationName: testOpName, variables: testVariables, response: testResp, duration: UInt64(testDuration))
+            let gqlMessage = ORGraphQL(operationKind: operationKind, operationName: operationName, variables: variablesString, response: responseString, duration: duration)
+            let hexStr = testGqlMessage.contentData().hexString()
+            print(hexStr)
+            MessageCollector.shared.sendMessage(testGqlMessage)
+        } else {
+            print("Openreplay: Unknown msg type passed.")
+        }
+    }
 }
 
 

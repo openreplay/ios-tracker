@@ -126,3 +126,20 @@ message 107, 'MobileBatchMeta' do
     uint 'Length'
     uint 'FirstIndex'
 end
+
+
+=begin
+
+EXTENSIONS AND PLUGINS
++ ported from web
+=end
+
+message 89, 'GraphQL' do
+    uint 'Timestamp'
+    uint 'Length'
+    string 'OperationKind'
+    string 'OperationName'
+    string 'Variables'
+    string 'Response'
+    uint 'Duration'
+end

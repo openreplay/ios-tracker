@@ -100,7 +100,6 @@ $ids = []
 $messages = []
 def message(id, name, opts = {}, &block)
   raise "id duplicated #{name}" if $ids.include? id
-  raise "id is too big #{name}" if id > 120
   $ids << id
   opts[:id] = id
   opts[:name] = name

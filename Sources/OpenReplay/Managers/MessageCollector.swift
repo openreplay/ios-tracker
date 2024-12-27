@@ -138,7 +138,7 @@ class MessageCollector: NSObject {
         let data = message.contentData()
         if (Openreplay.shared.options.debugLogs) {
             if !message.description.contains("Log") && !message.description.contains("NetworkCall") {
-                DebugUtils.log("\\\\\\\\ \(message.description)")
+                DebugUtils.log("\(message.description)")
             }
             if let networkCallMessage = message as? ORMobileNetworkCall {
                 DebugUtils.log("-->> IOSNetworkCall(105): \(networkCallMessage.method) \(networkCallMessage.URL)")
@@ -228,5 +228,11 @@ class MessageCollector: NSObject {
                 }
             }
         }
+    }
+}
+
+extension Data {
+    func hexString() -> String {
+        return map { String(format: "%02x", $0) }.joined()
     }
 }
