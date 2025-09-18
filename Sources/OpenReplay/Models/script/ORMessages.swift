@@ -18,7 +18,7 @@ enum ORMessageType: UInt64 {
     case mobileNetworkCall = 105
     case mobileSwipeEvent = 106
     case mobileBatchMeta = 107
-    case graphQL = 89
+    case graphQL = 109
 }
 
 class ORMobileMetadata: ORMessage {
@@ -529,11 +529,11 @@ class ORGraphQL: ORMessage {
     }
 
     override func contentData() -> Data {
-        return Data(values: UInt64(89), timestamp, Data(values: operationKind, operationName, variables, response, duration))
+        return Data(values: UInt64(109), timestamp, Data(values: operationKind, operationName, variables, response, duration))
     }
 
     override var description: String {
-        return "-->> GraphQL(89): timestamp:\(timestamp) operationKind:\(operationKind) operationName:\(operationName) variables:\(variables) response:\(response) duration:\(duration)";
+        return "-->> GraphQL(109): timestamp:\(timestamp) operationKind:\(operationKind) operationName:\(operationName) variables:\(variables) response:\(response) duration:\(duration)";
     }
 }
 

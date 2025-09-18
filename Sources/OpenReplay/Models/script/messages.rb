@@ -128,13 +128,7 @@ message 107, 'MobileBatchMeta' do
 end
 
 
-=begin
-
-EXTENSIONS AND PLUGINS
-+ ported from web
-=end
-
-message 89, 'GraphQL' do
+message 109, 'GraphQL' do
     uint 'Timestamp'
     uint 'Length'
     string 'OperationKind'
@@ -143,3 +137,10 @@ message 89, 'GraphQL' do
     string 'Response'
     uint 'Duration'
 end
+
+
+=begin
+
+EXTENSIONS AND PLUGINS
++ ported from web
+=end
