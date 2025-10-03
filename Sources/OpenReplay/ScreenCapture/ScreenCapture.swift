@@ -6,10 +6,17 @@ import SWCompression
 // MARK: - screenshot manager
 open class ScreenshotManager {
     public static let shared = ScreenshotManager()
-    private let messagesQueue = OperationQueue()
+    private let messagesQueue: OperationQueue = {
+        let q = OperationQueue()
+        q.maxConcurrentOperationCount = 1
+        q.qualityOfService = .utility
+        return q
+    }()
 
     private var timer: Timer?
     private var sendTimer: Timer?
+    private let maxPendingBatches = 50
+    private let maxBufferedScreenshots = 500
 
     private var sanitizedElements: [Sanitizable] = []
     private var observedInputs: [UITextField] = []
@@ -43,8 +50,11 @@ open class ScreenshotManager {
     func stop() {
         timer?.invalidate()
         timer = nil
+        bufferTimer?.invalidate()
+        bufferTimer = nil
         lastTs = 0
         screenshots.removeAll()
+        screenshotsBackup.removeAll()
     }
     
     func startTakingScreenshots(every interval: TimeInterval) {
@@ -71,95 +81,107 @@ open class ScreenshotManager {
 
     // MARK: - UI Capturing
     func takeScreenshot() {
-        guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else { return }
-        let size = window.frame.size
-      
-        guard size != .zero else { return }
-        UIGraphicsBeginImageContextWithOptions(size, false, screenScale)
-        guard let context = UIGraphicsGetCurrentContext() else { return }
-
-        // Rendering current window in custom context
-        // 2nd option looks to be more precise
-//      window?.layer.render(in: context)
-//         #warning("Can slow down the app depending on complexity of the UI tree")
-        window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
-        
-        // MARK: sanitize
-        // Sanitizing sensitive elements
-        if isBlurMode {
-            let stripeWidth: CGFloat = 5.0
-            let stripeSpacing: CGFloat = 15.0
-            let stripeColor: UIColor = .gray.withAlphaComponent(0.7)
+        autoreleasepool {
+            guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else { return }
+            let size = window.frame.size
             
-            for element in sanitizedElements {
-                if let frame = element.frameInWindow {
-                    let totalWidth = frame.size.width
-                    let totalHeight = frame.size.height
-                    let convertedFrame = CGRect(
-                        x: frame.origin.x,
-                        y: frame.origin.y,
-                        width: frame.size.width,
-                        height: frame.size.height
-                    )
-                    let cropFrame = CGRect(
-                        x: frame.origin.x * screenScale,
-                        y: frame.origin.y * screenScale,
-                        width: frame.size.width * screenScale,
-                        height: frame.size.height * screenScale
-                    )
-                    if let regionImage = UIGraphicsGetImageFromCurrentImageContext()?.cgImage?.cropping(to: cropFrame) {
-                        let imageToBlur = UIImage(cgImage: regionImage, scale: screenScale, orientation: .up)
-                        let blurredImage = imageToBlur.applyBlurWithRadius(blurRadius)
-                        blurredImage?.draw(in: convertedFrame)
-                        
-                        context.saveGState()
-                        UIRectClip(convertedFrame)
-
-                        // Draw diagonal lines within the clipped region
-                        for x in stride(from: -totalHeight, to: totalWidth, by: stripeSpacing + stripeWidth) {
-                            context.move(to: CGPoint(x: x + convertedFrame.minX, y: convertedFrame.minY))
-                            context.addLine(to: CGPoint(x: x + totalHeight + convertedFrame.minX, y: totalHeight + convertedFrame.minY))
+            guard size != .zero else { return }
+            UIGraphicsBeginImageContextWithOptions(size, false, screenScale)
+            guard let context = UIGraphicsGetCurrentContext() else { UIGraphicsEndImageContext(); return }
+            
+            // Rendering current window in custom context
+            // 2nd option looks to be more precise
+            //      window?.layer.render(in: context)
+            //         #warning("Can slow down the app depending on complexity of the UI tree")
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+            
+            // MARK: sanitize
+            // Sanitizing sensitive elements
+            if isBlurMode {
+                let stripeWidth: CGFloat = 5.0
+                let stripeSpacing: CGFloat = 15.0
+                let stripeColor: UIColor = .gray.withAlphaComponent(0.7)
+                
+                for element in sanitizedElements {
+                    if let frame = element.frameInWindow {
+                        let totalWidth = frame.size.width
+                        let totalHeight = frame.size.height
+                        let convertedFrame = CGRect(
+                            x: frame.origin.x,
+                            y: frame.origin.y,
+                            width: frame.size.width,
+                            height: frame.size.height
+                        )
+                        let cropFrame = CGRect(
+                            x: frame.origin.x * screenScale,
+                            y: frame.origin.y * screenScale,
+                            width: frame.size.width * screenScale,
+                            height: frame.size.height * screenScale
+                        )
+                        if let regionImage = UIGraphicsGetImageFromCurrentImageContext()?.cgImage?.cropping(to: cropFrame) {
+                            let imageToBlur = UIImage(cgImage: regionImage, scale: screenScale, orientation: .up)
+                            let blurredImage = imageToBlur.applyBlurWithRadius(blurRadius)
+                            blurredImage?.draw(in: convertedFrame)
+                            
+                            context.saveGState()
+                            UIRectClip(convertedFrame)
+                            
+                            // Draw diagonal lines within the clipped region
+                            for x in stride(from: -totalHeight, to: totalWidth, by: stripeSpacing + stripeWidth) {
+                                context.move(to: CGPoint(x: x + convertedFrame.minX, y: convertedFrame.minY))
+                                context.addLine(to: CGPoint(x: x + totalHeight + convertedFrame.minX, y: totalHeight + convertedFrame.minY))
+                            }
+                            
+                            context.setLineWidth(stripeWidth)
+                            stripeColor.setStroke()
+                            context.strokePath()
+                            context.restoreGState()
+                            
+                            if (openReplay.options.debugImages) {
+                                context.setStrokeColor(UIColor.black.cgColor)
+                                context.setLineWidth(1)
+                                context.stroke(convertedFrame)
+                            }
                         }
-
-                        context.setLineWidth(stripeWidth)
-                        stripeColor.setStroke()
-                        context.strokePath()
-                        context.restoreGState()
-                        
-                        if (openReplay.options.debugImages) {
-                            context.setStrokeColor(UIColor.black.cgColor)
-                            context.setLineWidth(1)
-                            context.stroke(convertedFrame)
-                        }
+                    } else {
+                        removeSanitizedElement(element)
                     }
-                } else {
-                    removeSanitizedElement(element)
+                }
+            } else {
+                context.setFillColor(UIColor.blue.cgColor)
+                for element in sanitizedElements {
+                    if let frame = element.frameInWindow {
+                        context.fill(frame)
+                    }
                 }
             }
-        } else {
-            context.setFillColor(UIColor.blue.cgColor)
-            for element in sanitizedElements {
-                if let frame = element.frameInWindow {
-                    context.fill(frame)
+            
+            // Get the resulting image
+            if let image = UIGraphicsGetImageFromCurrentImageContext() {
+                if let compressedData = image.jpegData(compressionQuality: self.settings.imgCompression) {
+                    if (openReplay.bufferingMode) {
+                        self.screenshotsBackup.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
+                    }
+                    screenshots.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
+                    self.enforceScreenshotCaps()
+                    if !openReplay.bufferingMode && screenshots.count >= openReplay.options.screenshotBatchSize.rawValue {
+                        self.sendScreenshots()
+                    }
                 }
             }
+            UIGraphicsEndImageContext()
         }
-
-        // Get the resulting image
-        if let image = UIGraphicsGetImageFromCurrentImageContext() {
-            if let compressedData = image.jpegData(compressionQuality: self.settings.imgCompression) {
-                if (openReplay.bufferingMode) {
-                    self.screenshotsBackup.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
-                }
-                screenshots.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
-                if !openReplay.bufferingMode && screenshots.count >= openReplay.options.screenshotBatchSize.rawValue {
-                    self.sendScreenshots()
-                }
-            }
-        }
-        UIGraphicsEndImageContext()
     }
-
+    
+    private func enforceScreenshotCaps() {
+        if screenshots.count > maxBufferedScreenshots {
+            screenshots.removeFirst(screenshots.count - maxBufferedScreenshots)
+        }
+        if screenshotsBackup.count > maxBufferedScreenshots {
+            screenshotsBackup.removeFirst(screenshotsBackup.count - maxBufferedScreenshots)
+        }
+    }
+    
     func cycleBuffer() {
         bufferTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true, block: { [weak self] _ in
             if Openreplay.shared.bufferingMode {
@@ -259,13 +281,13 @@ open class ScreenshotManager {
             return
         }
         let archiveName = "\(sessionId)-\(self.lastTs).tar.gz"
-        var combinedData = Data()
-        let images = screenshots
-        for (_, imageData) in screenshots.enumerated() {
-            combinedData.append(imageData.0)
-        }
     
+        let images = screenshots
         messagesQueue.addOperation {
+            if self.messagesQueue.operationCount > self.maxPendingBatches {
+                DebugUtils.log("Dropping screenshot batch due to backlog")
+                return
+            }
             var entries: [TarEntry] = []
             for imageData in images {
                 let filename = "\(self.firstTs)_1_\(imageData.1).jpeg"

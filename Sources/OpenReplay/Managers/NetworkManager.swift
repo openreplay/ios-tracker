@@ -12,8 +12,18 @@ class NetworkManager: NSObject {
     public var sessionId: String? = nil
     private var token: String? = nil
     public var writeToFile = false
+    
+    private lazy var session: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.httpMaximumConnectionsPerHost = 4
+        cfg.waitsForConnectivity = true
+        cfg.timeoutIntervalForRequest = 30
+        cfg.timeoutIntervalForResource = 60
+        return URLSession(configuration: cfg)
+    }()
 
     override init() {
+        super.init()
         if (Openreplay.shared.options.debugLogs) {
             if writeToFile, FileManager.default.fileExists(atPath: "/Users/nikitamelnikov/Desktop/session.dat") {
                 try? FileManager.default.removeItem(at: URL(fileURLWithPath: "/Users/nikitamelnikov/Desktop/session.dat"))
@@ -32,8 +42,10 @@ class NetworkManager: NSObject {
                  onSuccess: @escaping (Data) -> Void,
                  onError: @escaping (Error?) -> Void) {
         guard !writeToFile else { return }
-        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
-            DebugUtils.log(">>>\(request.httpMethod ?? ""):\(request.url?.absoluteString ?? "")\n<<<\(String(data: data ?? Data(), encoding: .utf8) ?? "")")
+        let task = session.dataTask(with: request) { (data, response, error) in
+            if Openreplay.shared.options.debugLogs {
+                DebugUtils.log(">>> \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "") status=\((response as? HTTPURLResponse)?.statusCode ?? -1)")
+            }
             
             DispatchQueue.main.async {
                 guard let data = data,
@@ -112,8 +124,6 @@ class NetworkManager: NSObject {
         } catch {
             DebugUtils.log("Error with compression: \(error)")
         }
-        
-        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
 
         request.httpBody = compressedContent
         callAPI(request: request) { (data) in

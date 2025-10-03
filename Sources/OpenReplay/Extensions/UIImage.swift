@@ -1,5 +1,6 @@
 import UIKit
 
+private let SharedCIContext = CIContext(options: nil)
 extension UIImage {
     func applyBlurWithRadius(_ blurRadius: CGFloat) -> UIImage? {
             if (size.width < 1 || size.height < 1) {
@@ -15,8 +16,8 @@ extension UIImage {
             guard let outputImage = filter?.outputImage else {
                 return nil
             }
-            let context = CIContext(options: nil)
-            guard let outputCGImage = context.createCGImage(outputImage, from: inputImage.extent) else {
+        
+            guard let outputCGImage = SharedCIContext.createCGImage(outputImage, from: inputImage.extent) else {
                 return nil
             }
             return UIImage(cgImage: outputCGImage)

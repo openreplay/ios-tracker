@@ -14,7 +14,13 @@ class MessageCollector: NSObject {
     private var nextMessageIndex = 0
     private var sendingLastMessages = false
     private let maxMessagesSize = 500_000
-    private let messagesQueue = OperationQueue()
+    private let messagesQueue: OperationQueue = {
+       let q = OperationQueue()
+       q.maxConcurrentOperationCount = 1
+       q.qualityOfService = .utility
+       q.name = "com.openreplay.messageCollector.queue"
+       return q
+   }()
     private let lateMessagesFile: URL?
     private var sendInterval: Timer?
     private var bufferTimer: Timer?
@@ -23,7 +29,7 @@ class MessageCollector: NSObject {
     private let queue = DispatchQueue(label: "com.messageCollector.queue", attributes: .concurrent)
 
     override init() {
-        lateMessagesFile = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("/lateMessages.dat")
+        lateMessagesFile = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("lateMessages.dat")
         super.init()
     }
 
@@ -33,7 +39,6 @@ class MessageCollector: NSObject {
         })
         NotificationCenter.default.addObserver(self, selector: #selector(terminate), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(terminate), name: UIApplication.willTerminateNotification, object: nil)
-        messagesQueue.maxConcurrentOperationCount = 1
 
         if let fileUrl = lateMessagesFile,
            FileManager.default.fileExists(atPath: fileUrl.path),
@@ -85,12 +90,20 @@ class MessageCollector: NSObject {
         sendInterval?.invalidate()
         NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIApplication.willTerminateNotification,  object: nil)
+        bufferTimer?.invalidate(); bufferTimer = nil
+        catchUpTimer?.invalidate(); catchUpTimer = nil
+        debounceTimer?.invalidate(); debounceTimer = nil
         self.terminate()
     }
 
     func sendImagesBatch(batch: Data, fileName: String) {
         self.imagesWaiting.append(BatchArch(name: fileName, data: batch))
         messagesQueue.addOperation {
+            if self.imagesWaiting.count > 200 {
+                let overflow = self.imagesWaiting.count - 200
+                self.imagesWaiting.removeFirst(overflow)
+            }
+        self.imagesWaiting.append(BatchArch(name: fileName, data: batch))
             self.flushImages()
         }
     }
@@ -100,6 +113,7 @@ class MessageCollector: NSObject {
         messagesQueue.addOperation {
             self.sendingLastMessages = true
             self.flushMessages()
+            self.flushImages()
         }
     }
 
@@ -114,17 +128,16 @@ class MessageCollector: NSObject {
         let images = imagesWaiting.first
         guard !imagesWaiting.isEmpty, let images = images, let projectKey = Openreplay.shared.projectKey else { return }
         imagesWaiting.remove(at: 0)
-        
         imagesSending.append(images)
 
         DebugUtils.log("Sending images \(images.name) \(images.data.count)")
         NetworkManager.shared.sendImages(projectKey: projectKey, images: images.data, name: images.name) { (success) in
-            self.imagesSending.removeAll { (waiting) -> Bool in
-                images.name == waiting.name
-            }
-            guard success else {
-                self.imagesWaiting.append(images)
-                return
+            self.messagesQueue.addOperation {
+                self.imagesSending.removeAll { waiting in images.name == waiting.name }
+                guard success else {
+                    self.imagesWaiting.insert(images, at: 0)
+                    return
+                }
             }
         }
     }
@@ -177,6 +190,14 @@ class MessageCollector: NSObject {
                     self.messagesWaitingBackup.append(data)
                 }
                 let totalWaitingSize = self.messagesWaiting.reduce(0) { $0 + $1.count }
+                let hardCapBytes = self.maxMessagesSize * 6 // ~3MB cap at 500KB batch size
+                if totalWaitingSize > hardCapBytes {
+                    var shed = 0
+                    while shed < (totalWaitingSize - hardCapBytes) && !self.messagesWaiting.isEmpty {
+                        shed += self.messagesWaiting.removeFirst().count
+                    }
+                    DebugUtils.log("Dropped \(shed) bytes from message backlog to cap memory")
+                }
                 if !Openreplay.shared.bufferingMode && totalWaitingSize > Int(Double(self.maxMessagesSize) * 0.8) {
                     self.flushMessages()
                 }

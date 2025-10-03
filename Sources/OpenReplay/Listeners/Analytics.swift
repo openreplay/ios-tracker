@@ -30,8 +30,9 @@ open class Analytics: NSObject {
     }
     
     @objc public func addObservedInput(_ element: UITextField) {
-        observedInputs.append(element)
+        element.removeTarget(self, action: #selector(textInputFinished), for: .editingDidEnd)
         element.addTarget(self, action: #selector(textInputFinished), for: .editingDidEnd)
+        observedInputs.append(element)
     }
     
     @objc public func addObservedView(view: UIView, screenName: String, viewName: String) {
@@ -57,6 +58,10 @@ open class Analytics: NSObject {
     }
     
     @objc func textInputFinished(_ sender: UITextField) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { self.textInputFinished(sender) }
+            return
+        }
         if (Openreplay.shared.options.debugLogs) {
             DebugUtils.log(">>>>>Text finish \(sender.text ?? "no_text") \(sender.placeholder ?? "no_placeholder")")
         }

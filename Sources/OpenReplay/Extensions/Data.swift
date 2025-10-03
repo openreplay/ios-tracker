@@ -32,11 +32,11 @@ extension Data {
     }
 
     func subdata(start: Int, length: Int) -> Data? {
-        let start = startIndex.advanced(by: start)
-        let end = start.advanced(by: length)
-        guard start >= 0, end <= count else { return nil }
-        return subdata(in: start..<end)
-    }
+        guard start >= 0, length >= 0, start + length <= count else { return nil }
+            let s = index(startIndex, offsetBy: start)
+            let e = index(s, offsetBy: length)
+            return subdata(in: s..<e)
+        }
 }
 
 extension Data {
