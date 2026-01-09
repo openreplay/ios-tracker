@@ -26,4 +26,3 @@ extension UIView: Sanitizable {
         return self.window == nil ? nil : self.convert(self.bounds, to: self.window)
     }
 }
-
