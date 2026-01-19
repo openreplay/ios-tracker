@@ -6,6 +6,7 @@ import SWCompression
 // MARK: - screenshot manager
 open class ScreenshotManager {
     public static let shared = ScreenshotManager()
+    private let stateLock = NSLock()
     private let messagesQueue: OperationQueue = {
         let q = OperationQueue()
         q.maxConcurrentOperationCount = 1
@@ -53,8 +54,10 @@ open class ScreenshotManager {
         bufferTimer?.invalidate()
         bufferTimer = nil
         lastTs = 0
+        stateLock.lock()
         screenshots.removeAll()
         screenshotsBackup.removeAll()
+        stateLock.unlock()
     }
     
     func startTakingScreenshots(every interval: TimeInterval) {
@@ -159,12 +162,17 @@ open class ScreenshotManager {
             // Get the resulting image
             if let image = UIGraphicsGetImageFromCurrentImageContext() {
                 if let compressedData = image.jpegData(compressionQuality: self.settings.imgCompression) {
+                    let ts = UInt64(Date().timeIntervalSince1970 * 1000)
+                    stateLock.lock()
                     if (openReplay.bufferingMode) {
-                        self.screenshotsBackup.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
+                        self.screenshotsBackup.append((compressedData, ts))
                     }
-                    screenshots.append((compressedData, UInt64(Date().timeIntervalSince1970 * 1000)))
+                    self.screenshots.append((compressedData, ts))
                     self.enforceScreenshotCaps()
-                    if !openReplay.bufferingMode && screenshots.count >= openReplay.options.screenshotBatchSize.rawValue {
+                    let shouldSend = !openReplay.bufferingMode &&
+                        self.screenshots.count >= openReplay.options.screenshotBatchSize.rawValue
+                    stateLock.unlock()
+                    if shouldSend {
                         self.sendScreenshots()
                     }
                 }
@@ -280,33 +288,47 @@ open class ScreenshotManager {
         guard let sessionId = NetworkManager.shared.sessionId else {
             return
         }
-        let archiveName = "\(sessionId)-\(self.lastTs).tar.gz"
-    
+        if messagesQueue.operationCount > maxPendingBatches {
+            DebugUtils.log("Dropping screenshot batch due to backlog")
+            return
+        }
+        
+        stateLock.lock()
         let images = screenshots
+        screenshots.removeAll()
+        let firstTsSnapshot = self.firstTs
+        let lastTsSnapshot = self.lastTs
+        stateLock.unlock()
+        
+        let archiveName = "\(sessionId)-\(lastTsSnapshot).tar.gz"
+    
         messagesQueue.addOperation {
             if self.messagesQueue.operationCount > self.maxPendingBatches {
                 DebugUtils.log("Dropping screenshot batch due to backlog")
                 return
             }
             var entries: [TarEntry] = []
+            var newLastTs = lastTsSnapshot
             for imageData in images {
-                let filename = "\(self.firstTs)_1_\(imageData.1).jpeg"
+                let filename = "\(firstTsSnapshot)_1_\(imageData.1).jpeg"
                 var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
                 tarEntry.info.permissions = Permissions(rawValue: 420)
                 tarEntry.info.creationTime = Date()
                 tarEntry.info.modificationTime = Date()
                 
                 entries.append(tarEntry)
-                self.lastTs = imageData.1
+                newLastTs = imageData.1
             }
             do {
                 let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
                 MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
+                self.stateLock.lock()
+                self.lastTs = newLastTs
+                self.stateLock.unlock()
             } catch {
                 DebugUtils.log("Error writing tar.gz data: \(error)")
             }
         }
-        screenshots.removeAll()
     }
 }
 

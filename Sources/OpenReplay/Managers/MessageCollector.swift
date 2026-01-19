@@ -97,14 +97,13 @@ class MessageCollector: NSObject {
     }
 
     func sendImagesBatch(batch: Data, fileName: String) {
-        self.imagesWaiting.append(BatchArch(name: fileName, data: batch))
         messagesQueue.addOperation {
-            if self.imagesWaiting.count > 200 {
-                let overflow = self.imagesWaiting.count - 200
+            if self.imagesWaiting.count >= 200 {
+                let overflow = self.imagesWaiting.count - 199
                 self.imagesWaiting.removeFirst(overflow)
             }
         self.imagesWaiting.append(BatchArch(name: fileName, data: batch))
-            self.flushImages()
+        self.flushImages()
         }
     }
 

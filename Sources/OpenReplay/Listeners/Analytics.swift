@@ -127,59 +127,67 @@ extension UIViewController {
     }
 }
 
-public class TouchTrackingWindow: UIWindow {
-    var touchStart: CGPoint?
-    
-    public override func sendEvent(_ event: UIEvent) {
-        super.sendEvent(event)
-        
+private var touchStartKey: UInt8 = 0
+
+public enum TouchTracking {
+    public static func capture(event: UIEvent, in window: UIWindow) {
         guard let touches = event.allTouches else { return }
-        
+
         for touch in touches {
             switch touch.phase {
             case .began:
-                touchStart = touch.location(in: self)
+                window.orTouchStart = touch.location(in: window)
             case .ended:
-                guard let touchStart else { return }
-                let location = touch.location(in: self)
+                guard let touchStart = window.orTouchStart else { return }
+                let location = touch.location(in: window)
                 let isSwipe = touchStart.distance(to: location) > 10
-                var event: ORMessage
+                var message: ORMessage
                 let description = getViewDescription(touch.view) ?? "UIView"
-                
+
                 // Clamp the coordinate to a minimum of 0 to ensure it can
                 // safely be converted to UInt64 without negative values
                 let locationX = max(location.x, 0)
                 let locationY = max(location.y, 0)
-                
+
                 if isSwipe {
                     DebugUtils.log("Swipe from \(touchStart) to \(location)")
-                    event = ORMobileSwipeEvent(
+                    message = ORMobileSwipeEvent(
                         label: description,
                         x: UInt64(locationX),
                         y: UInt64(locationY),
                         direction: detectSwipeDirection(from: touchStart, to: location)
                     )
                 } else {
-                    event = ORMobileClickEvent(
+                    message = ORMobileClickEvent(
                         label: description,
                         x: UInt64(locationX),
                         y: UInt64(locationY)
                     )
                     DebugUtils.log("Touch from \(touchStart) to \(location)")
                 }
-                self.touchStart = nil
-                MessageCollector.shared.sendMessage(event)
+                window.orTouchStart = nil
+                MessageCollector.shared.sendMessage(message)
             default:
                 break
             }
         }
     }
-    
-    private func getViewDescription(_ view: UIView?) -> String? {
+
+    public static func sendCustomClick(label: String, x: UInt64, y: UInt64) {
+        let message = ORMobileClickEvent(label: label, x: x, y: y)
+        MessageCollector.shared.sendMessage(message)
+    }
+
+    public static func sendCustomSwipe(label: String, x: UInt64, y: UInt64, direction: String) {
+        let message = ORMobileSwipeEvent(label: label, x: x, y: y, direction: direction)
+        MessageCollector.shared.sendMessage(message)
+    }
+
+    private static func getViewDescription(_ view: UIView?) -> String? {
         guard let view = view else {
             return nil
         }
-        
+
         if let textField = view as? UITextField {
             return "UITextField '\(textField.placeholder ?? "No Placeholder")'"
         } else if let label = view as? UILabel {
@@ -193,11 +201,10 @@ public class TouchTrackingWindow: UIWindow {
         }
     }
 
-    
-    private func detectSwipeDirection(from start: CGPoint, to end: CGPoint) -> String {
+    private static func detectSwipeDirection(from start: CGPoint, to end: CGPoint) -> String {
         let deltaX = end.x - start.x
         let deltaY = end.y - start.y
-        
+
         if abs(deltaX) > abs(deltaY) {
             if deltaX > 0 {
                 return "right"
@@ -211,8 +218,33 @@ public class TouchTrackingWindow: UIWindow {
                 return "up"
             }
         }
-        
+
         return "right"
+    }
+}
+
+private extension UIWindow {
+    var orTouchStart: CGPoint? {
+        get {
+            guard let value = objc_getAssociatedObject(self, &touchStartKey) as? NSValue else {
+                return nil
+            }
+            return value.cgPointValue
+        }
+        set {
+            if let newValue {
+                objc_setAssociatedObject(self, &touchStartKey, NSValue(cgPoint: newValue), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            } else {
+                objc_setAssociatedObject(self, &touchStartKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            }
+        }
+    }
+}
+
+public class TouchTrackingWindow: UIWindow {
+    public override func sendEvent(_ event: UIEvent) {
+        super.sendEvent(event)
+        TouchTracking.capture(event: event, in: self)
     }
 }
 
