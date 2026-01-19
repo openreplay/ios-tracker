@@ -263,6 +263,10 @@ open class Openreplay: NSObject {
             print("Openreplay: Unknown msg type passed.")
         }
     }
+    
+    @objc open func useTouchSwizzle() {
+        UIWindow.useOpenReplayTouchCapture()
+    }
 }
 
 

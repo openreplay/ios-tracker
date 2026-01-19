@@ -16,47 +16,46 @@ open class Analytics: NSObject {
         enabled = true
         UIViewController.swizzleLifecycleMethods()
     }
-    
+
     public func stop() {
         observedViews.removeAll()
         observedInputs.removeAll()
         enabled = false
-        // Unswizzle (reverse the swizzling) if needed in the
     }
-    
+
     @objc private func handleTap(gesture: UITapGestureRecognizer) {
         let location = gesture.location(in: nil)
         DebugUtils.log("Tap detected at: \(location)")
     }
-    
+
     @objc public func addObservedInput(_ element: UITextField) {
         element.removeTarget(self, action: #selector(textInputFinished), for: .editingDidEnd)
         element.addTarget(self, action: #selector(textInputFinished), for: .editingDidEnd)
         observedInputs.append(element)
     }
-    
+
     @objc public func addObservedView(view: UIView, screenName: String, viewName: String) {
         view.orScreenName = screenName
         view.orViewName = viewName
         observedViews.append(view)
     }
-    
+
     @objc public func sendClick(label: String, x: UInt64, y: UInt64) {
         let message = ORMobileClickEvent(label: label, x: x, y: y)
-        
+
         if Analytics.shared.enabled {
             MessageCollector.shared.sendMessage(message)
         }
     }
-    
+
     @objc public func sendSwipe(label: String, x: UInt64, y: UInt64, direction: String) {
         let message = ORMobileSwipeEvent(label: label, x: x,y: y, direction: direction)
-        
+
         if Analytics.shared.enabled {
             MessageCollector.shared.sendMessage(message)
         }
     }
-    
+
     @objc func textInputFinished(_ sender: UITextField) {
         if !Thread.isMainThread {
             DispatchQueue.main.async { self.textInputFinished(sender) }
@@ -74,8 +73,12 @@ open class Analytics: NSObject {
 }
 
 extension UIViewController {
+    private static var orDidSwizzleLifecycle = false
 
     static func swizzleLifecycleMethods() {
+        guard !orDidSwizzleLifecycle else { return }
+        orDidSwizzleLifecycle = true
+
         DebugUtils.log(">>>>> Openreplay: swizzle UIViewController")
 
         Self.swizzle(original: #selector(viewDidAppear(_:)), swizzled: #selector(swizzledViewDidAppear(_:)))
@@ -84,14 +87,14 @@ extension UIViewController {
 
     static private func swizzle(original: Selector, swizzled: Selector) {
         if let originalMethod = class_getInstanceMethod(self, original),
-            let swizzledMethod = class_getInstanceMethod(self, swizzled) {
+           let swizzledMethod = class_getInstanceMethod(self, swizzled) {
             method_exchangeImplementations(originalMethod, swizzledMethod)
         }
     }
 
     @objc private func swizzledViewDidAppear(_ animated: Bool) {
         self.swizzledViewDidAppear(animated)
-                
+
         if let (screenName, viewName) = isViewOrSubviewObservedEnter() {
             let message = ORMobileViewComponentEvent(screenName: screenName, viewName: viewName, visible: true)
             if Analytics.shared.enabled {
@@ -102,7 +105,7 @@ extension UIViewController {
 
     @objc private func swizzledViewDidDisappear(_ animated: Bool) {
         self.swizzledViewDidDisappear(animated)
-        
+
         if let (screenName, viewName) = isViewOrSubviewObservedEnter() {
             let message = ORMobileViewComponentEvent(screenName: screenName, viewName: viewName, visible: false)
             if Analytics.shared.enabled {
@@ -110,7 +113,7 @@ extension UIViewController {
             }
         }
     }
-    
+
     private func isViewOrSubviewObservedEnter() -> (screenName: String, viewName: String)? {
         var viewsToCheck: [UIView] = [self.view]
         while !viewsToCheck.isEmpty {
@@ -118,7 +121,6 @@ extension UIViewController {
             if let observed = Analytics.shared.observedViews.first(where: { $0 == view }) {
                 let screenName = observed.orScreenName ?? "Unknown ScreenName"
                 let viewName = observed.orViewName ?? "Unknown View"
-                
                 return (screenName, viewName)
             }
             viewsToCheck.append(contentsOf: view.subviews)
@@ -127,59 +129,82 @@ extension UIViewController {
     }
 }
 
-public class TouchTrackingWindow: UIWindow {
-    var touchStart: CGPoint?
-    
-    public override func sendEvent(_ event: UIEvent) {
-        super.sendEvent(event)
-        
-        guard let touches = event.allTouches else { return }
-        
+private var touchStartMapKey: UInt8 = 0
+
+public enum TouchTracking {
+    public static func capture(event: UIEvent, in window: UIWindow) {
+        guard event.type == .touches else { return }
+        guard let touches = event.allTouches, !touches.isEmpty else { return }
+
         for touch in touches {
+            let id = ObjectIdentifier(touch)
+
             switch touch.phase {
             case .began:
-                touchStart = touch.location(in: self)
+                var map = window.orTouchStartMap
+                map[id] = touch.location(in: window)
+                window.orTouchStartMap = map
+
             case .ended:
-                guard let touchStart else { return }
-                let location = touch.location(in: self)
+                var map = window.orTouchStartMap
+                guard let touchStart = map[id] else { continue }
+
+                let location = touch.location(in: window)
                 let isSwipe = touchStart.distance(to: location) > 10
-                var event: ORMessage
                 let description = getViewDescription(touch.view) ?? "UIView"
-                
-                // Clamp the coordinate to a minimum of 0 to ensure it can
-                // safely be converted to UInt64 without negative values
+
                 let locationX = max(location.x, 0)
                 let locationY = max(location.y, 0)
-                
+
+                let message: ORMessage
                 if isSwipe {
                     DebugUtils.log("Swipe from \(touchStart) to \(location)")
-                    event = ORMobileSwipeEvent(
+                    message = ORMobileSwipeEvent(
                         label: description,
                         x: UInt64(locationX),
                         y: UInt64(locationY),
                         direction: detectSwipeDirection(from: touchStart, to: location)
                     )
                 } else {
-                    event = ORMobileClickEvent(
+                    message = ORMobileClickEvent(
                         label: description,
                         x: UInt64(locationX),
                         y: UInt64(locationY)
                     )
                     DebugUtils.log("Touch from \(touchStart) to \(location)")
                 }
-                self.touchStart = nil
-                MessageCollector.shared.sendMessage(event)
+
+                map[id] = nil
+                window.orTouchStartMap = map
+
+                if Analytics.shared.enabled {
+                    MessageCollector.shared.sendMessage(message)
+                }
+
+            case .cancelled:
+                var map = window.orTouchStartMap
+                map[id] = nil
+                window.orTouchStartMap = map
+
             default:
                 break
             }
         }
     }
-    
-    private func getViewDescription(_ view: UIView?) -> String? {
-        guard let view = view else {
-            return nil
-        }
-        
+
+    public static func sendCustomClick(label: String, x: UInt64, y: UInt64) {
+        let message = ORMobileClickEvent(label: label, x: x, y: y)
+        MessageCollector.shared.sendMessage(message)
+    }
+
+    public static func sendCustomSwipe(label: String, x: UInt64, y: UInt64, direction: String) {
+        let message = ORMobileSwipeEvent(label: label, x: x, y: y, direction: direction)
+        MessageCollector.shared.sendMessage(message)
+    }
+
+    private static func getViewDescription(_ view: UIView?) -> String? {
+        guard let view = view else { return nil }
+
         if let textField = view as? UITextField {
             return "UITextField '\(textField.placeholder ?? "No Placeholder")'"
         } else if let label = view as? UILabel {
@@ -193,30 +218,61 @@ public class TouchTrackingWindow: UIWindow {
         }
     }
 
-    
-    private func detectSwipeDirection(from start: CGPoint, to end: CGPoint) -> String {
+    private static func detectSwipeDirection(from start: CGPoint, to end: CGPoint) -> String {
         let deltaX = end.x - start.x
         let deltaY = end.y - start.y
-        
+
         if abs(deltaX) > abs(deltaY) {
-            if deltaX > 0 {
-                return "right"
-            } else {
-                return "left"
-            }
+            return deltaX > 0 ? "right" : "left"
         } else if abs(deltaY) > abs(deltaX) {
-            if deltaY > 0 {
-                return "down"
-            } else {
-                return "up"
-            }
+            return deltaY > 0 ? "down" : "up"
         }
-        
+
         return "right"
     }
 }
 
+private extension UIWindow {
+    var orTouchStartMap: [ObjectIdentifier: CGPoint] {
+        get {
+            (objc_getAssociatedObject(self, &touchStartMapKey) as? [ObjectIdentifier: CGPoint]) ?? [:]
+        }
+        set {
+            objc_setAssociatedObject(self, &touchStartMapKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+    }
+}
 
+public class TouchTrackingWindow: UIWindow {
+    public override func sendEvent(_ event: UIEvent) {
+        super.sendEvent(event)
+        TouchTracking.capture(event: event, in: self)
+    }
+}
+
+extension UIWindow {
+    private static var orDidSwizzleSendEvent = false
+
+    static func useOpenReplayTouchCapture() {
+        guard !orDidSwizzleSendEvent else { return }
+        orDidSwizzleSendEvent = true
+
+        let original = #selector(UIWindow.sendEvent(_:))
+        let swizzled = #selector(UIWindow.or_sendEvent(_:))
+
+        guard
+            let originalMethod = class_getInstanceMethod(UIWindow.self, original),
+            let swizzledMethod = class_getInstanceMethod(UIWindow.self, swizzled)
+        else { return }
+
+        method_exchangeImplementations(originalMethod, swizzledMethod)
+    }
+
+    @objc private func or_sendEvent(_ event: UIEvent) {
+        self.or_sendEvent(event)
+        TouchTracking.capture(event: event, in: self)
+    }
+}
 
 extension CGPoint {
     func distance(to point: CGPoint) -> CGFloat {
@@ -228,29 +284,36 @@ public struct ObservedInputModifier: ViewModifier {
     @Binding var text: String
     let label: String?
     let masked: Bool?
-    
+
     public func body(content: Content) -> some View {
-        content
-            .onReceive(text.publisher.collect()) { value in
+        if #available(iOS 14.0, *) {
+            return content.onChange(of: text) { value in
+                textInputFinished(value: value, label: label, masked: masked)
+            }
+        } else {
+            return content.onReceive(text.publisher.collect()) { value in
                 let stringValue = String(value)
                 textInputFinished(value: stringValue, label: label, masked: masked)
             }
+        }
     }
-    
-    private func textInputFinished(value: String, label: String?, masked: Bool?) {
+
+    func textInputFinished(value: String, label: String?, masked: Bool?) {
         guard !value.isEmpty else { return }
         var sentValue = value
         if masked ?? false {
             sentValue = "****"
         }
-        MessageCollector.shared.sendDebouncedMessage(ORMobileInputEvent(value: sentValue, valueMasked: masked ?? false, label: label ?? ""))
+        MessageCollector.shared.sendDebouncedMessage(
+            ORMobileInputEvent(value: sentValue, valueMasked: masked ?? false, label: label ?? "")
+        )
     }
 }
 
 public struct ViewLifecycleModifier: ViewModifier {
     let screenName: String
     let viewName: String
-    
+
     public func body(content: Content) -> some View {
         content
             .onAppear {
@@ -259,7 +322,6 @@ public struct ViewLifecycleModifier: ViewModifier {
                 if Analytics.shared.enabled {
                     MessageCollector.shared.sendMessage(message)
                 }
-                
             }
             .onDisappear {
                 DebugUtils.log("<><><>disappear view \(viewName)")
@@ -270,7 +332,6 @@ public struct ViewLifecycleModifier: ViewModifier {
             }
     }
 }
-
 
 public extension View {
     func observeView(screenName: String, viewName: String) -> some View {
@@ -287,19 +348,19 @@ extension UIView {
         static var orScreenName: String = "OR: screenName"
         static var orViewName: String = "OR: viewName"
     }
-    
+
     var orScreenName: String? {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.orScreenName) as? String
+            objc_getAssociatedObject(self, &AssociatedKeys.orScreenName) as? String
         }
         set {
             objc_setAssociatedObject(self, &AssociatedKeys.orScreenName, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
     }
-    
+
     var orViewName: String? {
         get {
-            return objc_getAssociatedObject(self, &AssociatedKeys.orViewName) as? String
+            objc_getAssociatedObject(self, &AssociatedKeys.orViewName) as? String
         }
         set {
             objc_setAssociatedObject(self, &AssociatedKeys.orViewName, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
