@@ -12,6 +12,7 @@ class NetworkManager: NSObject {
     public var sessionId: String? = nil
     private var token: String? = nil
     public var writeToFile = false
+    private var framesSupport = false
     
     private lazy var session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
@@ -88,6 +89,7 @@ class NetworkManager: NSObject {
                 
                 self.token = session.token
                 self.sessionId = session.sessionID
+                self.framesSupport = session.framesSupport ?? false
                 ORUserDefaults.shared.lastToken = self.token
                 completion(session)
             } catch {
@@ -162,7 +164,12 @@ class NetworkManager: NSObject {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
-        let parameters = ["projectKey": projectKey]
+        var parameters = ["projectKey": projectKey]
+        
+        if framesSupport {
+            parameters["type"] = "frames"
+        }
+        
         for (key, value) in parameters {
             body.appendString("--\(boundary)\r\n")
             body.appendString("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")

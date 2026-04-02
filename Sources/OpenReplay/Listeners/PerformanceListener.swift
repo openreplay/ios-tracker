@@ -12,8 +12,10 @@ open class PerformanceListener: NSObject {
     func start() {
         guard !isActive else { return }
 //         #warning("Can interfere with client usage")
-        UIDevice.current.isBatteryMonitoringEnabled = true
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        DispatchQueue.main.async {
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        }
         
         let observe: (Notification.Name) -> Void = {
             NotificationCenter.default.addObserver(self, selector: #selector(self.notified(_:)), name: $0, object: nil)
@@ -81,9 +83,11 @@ open class PerformanceListener: NSObject {
             
             DebugUtils.log("Resume collector")
             MessageCollector.shared.start()
-            
-            UIDevice.current.isBatteryMonitoringEnabled = true
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+
+            DispatchQueue.main.async {
+                UIDevice.current.isBatteryMonitoringEnabled = true
+                UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            }
             
             let observe: (Notification.Name) -> Void = {
                 NotificationCenter.default.addObserver(self, selector: #selector(self.notified(_:)), name: $0, object: nil)
@@ -175,8 +179,10 @@ open class PerformanceListener: NSObject {
     }
     
     func stopTrackingMethods() {
-        UIDevice.current.isBatteryMonitoringEnabled = false
-        UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        DispatchQueue.main.async {
+            UIDevice.current.isBatteryMonitoringEnabled = false
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        }
 
         NotificationCenter.default.removeObserver(self, name: .NSBundleResourceRequestLowDiskSpace, object: nil)
         NotificationCenter.default.removeObserver(self, name: .NSProcessInfoPowerStateDidChange, object: nil)

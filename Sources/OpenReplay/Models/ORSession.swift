@@ -84,6 +84,7 @@ struct ORSessionResponse: Decodable {
     let fps: Int
     let quality: String
     let projectID: String
+    let framesSupport: Bool?
 }
 
 func getTimezone() -> String {

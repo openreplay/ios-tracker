@@ -27,6 +27,7 @@ open class ScreenshotManager {
     private var bufferTimer: Timer?
     private var lastTs: UInt64 = 0
     private var firstTs: UInt64 = 0
+    private var useFramesFormat = false
     // MARK: capture settings
     // should we blur out sensitive views, or place a solid box on top
     private var isBlurMode = true
@@ -39,8 +40,9 @@ open class ScreenshotManager {
     
     private init() { }
 
-    func start(startTs: UInt64) {
+    func start(startTs: UInt64, framesSupport: Bool = false) {
         firstTs = startTs
+        useFramesFormat = framesSupport
         startTakingScreenshots(every: settings.captureRate)
     }
     
@@ -221,11 +223,94 @@ open class ScreenshotManager {
         self.sendScreenshots()
     }
 
+    // MARK: - sending screenshots
+    func sendScreenshots() {
+        guard let sessionId = NetworkManager.shared.sessionId else {
+            return
+        }
+        if messagesQueue.operationCount > maxPendingBatches {
+            DebugUtils.log("Dropping screenshot batch due to backlog")
+            return
+        }
+        
+        stateLock.lock()
+        let images = screenshots
+        screenshots.removeAll()
+        let firstTsSnapshot = self.firstTs
+        let lastTsSnapshot = self.lastTs
+        let framesFormat = self.useFramesFormat
+        stateLock.unlock()
+        
+        var archiveName = ""
+    
+        messagesQueue.addOperation {
+            if self.messagesQueue.operationCount > self.maxPendingBatches {
+                DebugUtils.log("Dropping screenshot batch due to backlog")
+                return
+            }
+            if framesFormat {
+                archiveName = "\(sessionId)-\(lastTsSnapshot).gz"
+                // New binary format: [uint64 LE timestamp][uint32 LE size][data]...
+                var binaryData = Data()
+                var newLastTs = lastTsSnapshot
+                
+                for imageData in images {
+                    let timestamp = imageData.1
+                    let imageBytes = imageData.0
+                    let size = UInt32(imageBytes.count)
+                    
+                    binaryData.appendUInt64LE(timestamp)
+                    binaryData.appendUInt32LE(size)
+                    binaryData.append(imageBytes)
+                    
+                    newLastTs = timestamp
+                }
+                do {
+                    let gzData = try GzipArchive.archive(data: binaryData)
+                    
+                    MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
+                    self.stateLock.lock()
+                    self.lastTs = newLastTs
+                    self.stateLock.unlock()
+                } catch {
+                    DebugUtils.log("Error creating frames format archive: \(error)")
+                }
+            } else {
+                // Old tar format: separate .jpeg files
+                archiveName = "\(sessionId)-\(lastTsSnapshot).tar.gz"
+                var entries: [TarEntry] = []
+                var newLastTs = lastTsSnapshot
+                for imageData in images {
+                    print("\(firstTsSnapshot)_1_\(imageData.1).jpeg")
+                    let filename = "\(firstTsSnapshot)_1_\(imageData.1).jpeg"
+                    var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
+                    tarEntry.info.permissions = Permissions(rawValue: 420)
+                    tarEntry.info.creationTime = Date()
+                    tarEntry.info.modificationTime = Date()
+                    
+                    entries.append(tarEntry)
+                    newLastTs = imageData.1
+                }
+                do {
+                    let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
+                    MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
+                    self.stateLock.lock()
+                    self.lastTs = newLastTs
+                    self.stateLock.unlock()
+                } catch {
+                    DebugUtils.log("Error writing tar.gz data: \(error)")
+                }
+            }
+        }
+    }
+    
+    
+    // MARK: -- SAVING LOCALLY
     func saveScreenshotsLocally() {
         guard let sessionId = NetworkManager.shared.sessionId else {
             return
         }
-        let archiveName = "\(sessionId)-\(self.lastTs).tar.gz"
+        let archiveName = "\(sessionId)-\(self.lastTs)_LOCAL.tar.gz"
         let localFilePath = "/Users/nikitamelnikov/Desktop/session/"
         let desktopURL = URL(fileURLWithPath: localFilePath)
         let archiveURL = desktopURL.appendingPathComponent(archiveName)
@@ -237,6 +322,8 @@ open class ScreenshotManager {
         }
         var combinedData = Data()
         let images = screenshots
+        let framesFormat = self.useFramesFormat
+        
         for (_, imageData) in screenshots.enumerated() {
             combinedData.append(imageData.0)
             if (Openreplay.shared.options.debugImages) {
@@ -255,80 +342,81 @@ open class ScreenshotManager {
         }
     
         messagesQueue.addOperation {
-            var entries: [TarEntry] = []
-            for imageData in images {
-                let filename = "\(self.firstTs)_1_\(imageData.1).jpeg"
-                var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
-                tarEntry.info.permissions = Permissions(rawValue: 420)
-                tarEntry.info.creationTime = Date()
-                tarEntry.info.modificationTime = Date()
-                
-                entries.append(tarEntry)
-                self.lastTs = imageData.1
-            }
-            do {
-                let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
-                
-                if (Openreplay.shared.options.debugImages) {
-                    try gzData.write(to: archiveURL)
-                    DebugUtils.log("Archive saved to \(archiveURL.path)")
-                    MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
-                } else {
-                    MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
+            if framesFormat {
+                // New binary format
+                var binaryData = Data()
+                for imageData in images {
+                    let timestamp = imageData.1
+                    let imageBytes = imageData.0
+                    let size = UInt32(imageBytes.count)
+                    
+                    binaryData.appendUInt64LE(timestamp)
+                    binaryData.appendUInt32LE(size)
+                    binaryData.append(imageBytes)
+                    
+                    self.lastTs = timestamp
                 }
-            } catch {
-                DebugUtils.log("Error writing tar.gz data: \(error)")
-            }
-        }
-        screenshots.removeAll()
-    }
-
-    // MARK: - sending screenshots
-    func sendScreenshots() {
-        guard let sessionId = NetworkManager.shared.sessionId else {
-            return
-        }
-        if messagesQueue.operationCount > maxPendingBatches {
-            DebugUtils.log("Dropping screenshot batch due to backlog")
-            return
-        }
-        
-        stateLock.lock()
-        let images = screenshots
-        screenshots.removeAll()
-        let firstTsSnapshot = self.firstTs
-        let lastTsSnapshot = self.lastTs
-        stateLock.unlock()
-        
-        let archiveName = "\(sessionId)-\(lastTsSnapshot).tar.gz"
-    
-        messagesQueue.addOperation {
-            if self.messagesQueue.operationCount > self.maxPendingBatches {
-                DebugUtils.log("Dropping screenshot batch due to backlog")
-                return
-            }
-            var entries: [TarEntry] = []
-            var newLastTs = lastTsSnapshot
-            for imageData in images {
-                let filename = "\(firstTsSnapshot)_1_\(imageData.1).jpeg"
-                var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
-                tarEntry.info.permissions = Permissions(rawValue: 420)
-                tarEntry.info.creationTime = Date()
-                tarEntry.info.modificationTime = Date()
                 
-                entries.append(tarEntry)
-                newLastTs = imageData.1
-            }
-            do {
-                let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
-                MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
-                self.stateLock.lock()
-                self.lastTs = newLastTs
-                self.stateLock.unlock()
-            } catch {
-                DebugUtils.log("Error writing tar.gz data: \(error)")
+                do {
+                    let filename = "\(self.firstTs)_1.jpeg.frames"
+                    let gzData = try GzipArchive.archive(data: binaryData)
+                    
+                    if (Openreplay.shared.options.debugImages) {
+                        let framesFileURL = desktopURL.appendingPathComponent(filename + ".gz")
+                        try gzData.write(to: framesFileURL)
+                        DebugUtils.log("Frames file saved to \(framesFileURL.path)")
+                    }
+                    
+                    var tarEntry = TarContainer.Entry(
+                        info: .init(name: filename, type: .regular),
+                        data: gzData
+                    )
+                    tarEntry.info.permissions = Permissions(rawValue: 420)
+                    tarEntry.info.creationTime = Date()
+                    tarEntry.info.modificationTime = Date()
+                    
+                    let tarData = TarContainer.create(from: [tarEntry])
+                    let finalArchive = try GzipArchive.archive(data: tarData)
+                    
+                    if (Openreplay.shared.options.debugImages) {
+                        try finalArchive.write(to: archiveURL)
+                        DebugUtils.log("Archive saved to \(archiveURL.path)")
+                        MessageCollector.shared.sendImagesBatch(batch: finalArchive, fileName: archiveName)
+                    } else {
+                        MessageCollector.shared.sendImagesBatch(batch: finalArchive, fileName: archiveName)
+                    }
+                } catch {
+                    DebugUtils.log("Error creating frames format archive: \(error)")
+                }
+            } else {
+                // Old tar format
+                var entries: [TarEntry] = []
+                for imageData in images {
+                    let filename = "\(self.firstTs)_1_\(imageData.1).jpeg"
+                    var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
+                    tarEntry.info.permissions = Permissions(rawValue: 420)
+                    tarEntry.info.creationTime = Date()
+                    tarEntry.info.modificationTime = Date()
+                    
+                    entries.append(tarEntry)
+                    self.lastTs = imageData.1
+                }
+                do {
+                    let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
+                    
+                    if (Openreplay.shared.options.debugImages) {
+                        try gzData.write(to: archiveURL)
+                        DebugUtils.log("Archive saved to \(archiveURL.path)")
+                        MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
+                    } else {
+                        MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
+                    }
+                } catch {
+                    DebugUtils.log("Error writing tar.gz data: \(error)")
+                }
             }
         }
+        screenshots.removeAll()
     }
 }
 
@@ -385,6 +473,19 @@ class SensitiveTextField: UITextField {
 // Protocol to make a UIView sanitizable
 public protocol Sanitizable {
     var frameInWindow: CGRect? { get }
+}
+
+// MARK: - Binary Data Helpers
+extension Data {
+    mutating func appendUInt64LE(_ value: UInt64) {
+        var val = value.littleEndian
+        Swift.withUnsafeBytes(of: &val) { self.append(contentsOf: $0) }
+    }
+
+    mutating func appendUInt32LE(_ value: UInt32) {
+        var val = value.littleEndian
+        Swift.withUnsafeBytes(of: &val) { self.append(contentsOf: $0) }
+    }
 }
 
 
