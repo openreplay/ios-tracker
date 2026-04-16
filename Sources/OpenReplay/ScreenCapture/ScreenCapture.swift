@@ -55,8 +55,8 @@ open class ScreenshotManager {
         timer = nil
         bufferTimer?.invalidate()
         bufferTimer = nil
-        lastTs = 0
         stateLock.lock()
+        lastTs = 0
         screenshots.removeAll()
         screenshotsBackup.removeAll()
         stateLock.unlock()
@@ -90,7 +90,7 @@ open class ScreenshotManager {
             guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else { return }
             let size = window.frame.size
             
-            guard size != .zero else { return }
+            guard size.width > 0 && size.height > 0 else { return }
             UIGraphicsBeginImageContextWithOptions(size, false, screenScale)
             guard let context = UIGraphicsGetCurrentContext() else { UIGraphicsEndImageContext(); return }
             
@@ -194,24 +194,26 @@ open class ScreenshotManager {
     
     func cycleBuffer() {
         bufferTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true, block: { [weak self] _ in
+            guard let self = self else { return }
             if Openreplay.shared.bufferingMode {
-                let currTick = self?.tick ?? 0
+                self.stateLock.lock()
+                let currTick = self.tick
                 if (currTick % 2 == 0) {
-                    self?.screenshots.removeAll()
+                    self.screenshots.removeAll()
                 } else {
-                    self?.screenshotsBackup.removeAll()
+                    self.screenshotsBackup.removeAll()
                 }
-                self?.tick += 1
+                self.tick += 1
+                self.stateLock.unlock()
             }
         })
     }
 
     func syncBuffers() {
+        stateLock.lock()
         let buf1 = self.screenshots.count
         let buf2 = self.screenshotsBackup.count
         self.tick = 0
-        bufferTimer?.invalidate()
-        bufferTimer = nil
 
         if buf1 > buf2 {
             self.screenshotsBackup.removeAll()
@@ -219,7 +221,11 @@ open class ScreenshotManager {
             self.screenshots = self.screenshotsBackup
             self.screenshotsBackup.removeAll()
         }
-        
+        stateLock.unlock()
+
+        bufferTimer?.invalidate()
+        bufferTimer = nil
+
         self.sendScreenshots()
     }
 
@@ -310,7 +316,16 @@ open class ScreenshotManager {
         guard let sessionId = NetworkManager.shared.sessionId else {
             return
         }
-        let archiveName = "\(sessionId)-\(self.lastTs)_LOCAL.tar.gz"
+
+        stateLock.lock()
+        let images = screenshots
+        screenshots.removeAll()
+        let lastTsSnapshot = self.lastTs
+        let firstTsSnapshot = self.firstTs
+        let framesFormat = self.useFramesFormat
+        stateLock.unlock()
+
+        let archiveName = "\(sessionId)-\(lastTsSnapshot)_LOCAL.tar.gz"
         let localFilePath = "/Users/nikitamelnikov/Desktop/session/"
         let desktopURL = URL(fileURLWithPath: localFilePath)
         let archiveURL = desktopURL.appendingPathComponent(archiveName)
@@ -320,16 +335,12 @@ open class ScreenshotManager {
         if !fileManager.fileExists(atPath: localFilePath) {
             try? fileManager.createDirectory(at: desktopURL, withIntermediateDirectories: true, attributes: nil)
         }
-        var combinedData = Data()
-        let images = screenshots
-        let framesFormat = self.useFramesFormat
-        
-        for (_, imageData) in screenshots.enumerated() {
-            combinedData.append(imageData.0)
+
+        for imageData in images {
             if (Openreplay.shared.options.debugImages) {
                 let filename = "sessSt_1_\(imageData.1).jpeg"
                 let fileURL = desktopURL.appendingPathComponent(filename)
-                
+
                 do {
                     try imageData.0.write(to: fileURL)
                 } catch {
@@ -340,33 +351,34 @@ open class ScreenshotManager {
         if (Openreplay.shared.options.debugLogs) {
             DebugUtils.log("saved image files in \(localFilePath)")
         }
-    
+
         messagesQueue.addOperation {
             if framesFormat {
                 // New binary format
                 var binaryData = Data()
+                var newLastTs = lastTsSnapshot
                 for imageData in images {
                     let timestamp = imageData.1
                     let imageBytes = imageData.0
                     let size = UInt32(imageBytes.count)
-                    
+
                     binaryData.appendUInt64LE(timestamp)
                     binaryData.appendUInt32LE(size)
                     binaryData.append(imageBytes)
-                    
-                    self.lastTs = timestamp
+
+                    newLastTs = timestamp
                 }
-                
+
                 do {
-                    let filename = "\(self.firstTs)_1.jpeg.frames"
+                    let filename = "\(firstTsSnapshot)_1.jpeg.frames"
                     let gzData = try GzipArchive.archive(data: binaryData)
-                    
+
                     if (Openreplay.shared.options.debugImages) {
                         let framesFileURL = desktopURL.appendingPathComponent(filename + ".gz")
                         try gzData.write(to: framesFileURL)
                         DebugUtils.log("Frames file saved to \(framesFileURL.path)")
                     }
-                    
+
                     var tarEntry = TarContainer.Entry(
                         info: .init(name: filename, type: .regular),
                         data: gzData
@@ -374,49 +386,51 @@ open class ScreenshotManager {
                     tarEntry.info.permissions = Permissions(rawValue: 420)
                     tarEntry.info.creationTime = Date()
                     tarEntry.info.modificationTime = Date()
-                    
+
                     let tarData = TarContainer.create(from: [tarEntry])
                     let finalArchive = try GzipArchive.archive(data: tarData)
-                    
+
                     if (Openreplay.shared.options.debugImages) {
                         try finalArchive.write(to: archiveURL)
                         DebugUtils.log("Archive saved to \(archiveURL.path)")
-                        MessageCollector.shared.sendImagesBatch(batch: finalArchive, fileName: archiveName)
-                    } else {
-                        MessageCollector.shared.sendImagesBatch(batch: finalArchive, fileName: archiveName)
                     }
+                    MessageCollector.shared.sendImagesBatch(batch: finalArchive, fileName: archiveName)
+                    self.stateLock.lock()
+                    self.lastTs = newLastTs
+                    self.stateLock.unlock()
                 } catch {
                     DebugUtils.log("Error creating frames format archive: \(error)")
                 }
             } else {
                 // Old tar format
                 var entries: [TarEntry] = []
+                var newLastTs = lastTsSnapshot
                 for imageData in images {
-                    let filename = "\(self.firstTs)_1_\(imageData.1).jpeg"
+                    let filename = "\(firstTsSnapshot)_1_\(imageData.1).jpeg"
                     var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
                     tarEntry.info.permissions = Permissions(rawValue: 420)
                     tarEntry.info.creationTime = Date()
                     tarEntry.info.modificationTime = Date()
-                    
+
                     entries.append(tarEntry)
-                    self.lastTs = imageData.1
+                    newLastTs = imageData.1
                 }
                 do {
                     let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
-                    
+
                     if (Openreplay.shared.options.debugImages) {
                         try gzData.write(to: archiveURL)
                         DebugUtils.log("Archive saved to \(archiveURL.path)")
-                        MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
-                    } else {
-                        MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
                     }
+                    MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
+                    self.stateLock.lock()
+                    self.lastTs = newLastTs
+                    self.stateLock.unlock()
                 } catch {
                     DebugUtils.log("Error writing tar.gz data: \(error)")
                 }
             }
         }
-        screenshots.removeAll()
     }
 }
 

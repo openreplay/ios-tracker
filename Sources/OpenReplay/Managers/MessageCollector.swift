@@ -52,37 +52,40 @@ class MessageCollector: NSObject {
 
     func cycleBuffer() {
         bufferTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true, block: { [weak self] _ in
-            if (self == nil) {
-                return
-            }
+            guard let self = self else { return }
             Openreplay.shared.sessionStartTs = UInt64(Date().timeIntervalSince1970 * 1000)
             if Openreplay.shared.bufferingMode {
-                let currTick = self?.tick ?? 0
-                if (currTick % 2 == 0) {
-                    self?.messagesWaiting = []
-                } else {
-                    self?.messagesWaitingBackup = []
+                self.queue.async(flags: .barrier) {
+                    let currTick = self.tick
+                    if (currTick % 2 == 0) {
+                        self.messagesWaiting = []
+                    } else {
+                        self.messagesWaitingBackup = []
+                    }
+                    self.tick += 1
                 }
-                self?.tick += 1
             }
         })
     }
 
     func syncBuffers() {
-        let buf1 = self.messagesWaiting.count
-        let buf2 = self.messagesWaitingBackup.count
-        self.tick = 0
         bufferTimer?.invalidate()
         bufferTimer = nil
 
-        if buf1 > buf2 {
-            self.messagesWaitingBackup.removeAll()
-        } else {
-            self.messagesWaiting = self.messagesWaitingBackup
-            self.messagesWaitingBackup.removeAll()
+        queue.async(flags: .barrier) {
+            let buf1 = self.messagesWaiting.count
+            let buf2 = self.messagesWaitingBackup.count
+            self.tick = 0
+
+            if buf1 > buf2 {
+                self.messagesWaitingBackup.removeAll()
+            } else {
+                self.messagesWaiting = self.messagesWaitingBackup
+                self.messagesWaitingBackup.removeAll()
+            }
+
+            self.flushMessages()
         }
-        
-        self.flushMessages()
     }
     
     func stop() {
@@ -174,12 +177,12 @@ class MessageCollector: NSObject {
     }
 
     func sendRawMessage(_ data: Data) {
-        if self.messagesWaiting.count >= 10_000 {
-            DebugUtils.log("Message queue size exceeded, dropping message")
-            return
-        }
         messagesQueue.addOperation {
             self.queue.async(flags: .barrier) {
+                if self.messagesWaiting.count >= 10_000 {
+                    DebugUtils.log("Message queue size exceeded, dropping message")
+                    return
+                }
                 if data.count > self.maxMessagesSize {
                     DebugUtils.log("<><><>Single message size exceeded limit")
                     return
