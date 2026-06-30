@@ -22,6 +22,7 @@ import Foundation
 ///   - wifiOnly: Restrict data transmission to Wi-Fi connections only.
 ///   - debugLogs: Enable or disable debug logging.
 ///   - debugImages: Enable or disable capturing debug images.
+///   - isBlur: Blur sensitive views (when `true`) or cover them with a solid box (when `false`).
 open class OROptions: NSObject {
     /// Enable or disable crash reporting.
     let crashes: Bool
@@ -41,10 +42,12 @@ open class OROptions: NSObject {
     let debugLogs: Bool
     /// Enable or disable capturing debug images.
     let debugImages: Bool
-    
+    /// Blur sensitive views (when `true`) or cover them with a solid box (when `false`).
+    let isBlur: Bool
+
     /// Default options for release builds.
     public static let defaults = OROptions(crashes: true, analytics: true, performances: true, logs: true, screen: true, screenshotBatchSize: .normal, wifiOnly: true, debugLogs: false, debugImages: false)
-    
+
     /// Default options for debug builds.
     public static let defaultDebug = OROptions(crashes: true, analytics: true, performances: true, logs: true, screen: true, screenshotBatchSize: .normal, wifiOnly: true, debugLogs: true, debugImages: false)
     
@@ -60,7 +63,8 @@ open class OROptions: NSObject {
     ///   - wifiOnly: Restrict data transmission to Wi-Fi connections only. Default is `true`.
     ///   - debugLogs: Enable or disable debug logging. Default is `false`.
     ///   - debugImages: Enable or disable capturing debug images. Default is `false`.
-    @objc public init(crashes: Bool = true, analytics: Bool = true, performances: Bool = true, logs: Bool = true, screen: Bool = true, screenshotBatchSize: ScreenshotBatchSize = .normal, wifiOnly: Bool = true, debugLogs: Bool = false, debugImages: Bool = false) {
+    ///   - isBlur: Blur sensitive views (when `true`) or cover them with a solid box (when `false`). Default is `true`.
+    @objc public init(crashes: Bool = true, analytics: Bool = true, performances: Bool = true, logs: Bool = true, screen: Bool = true, screenshotBatchSize: ScreenshotBatchSize = .normal, wifiOnly: Bool = true, debugLogs: Bool = false, debugImages: Bool = false, isBlur: Bool = true) {
         self.crashes = crashes
         self.analytics = analytics
         self.performances = performances
@@ -70,6 +74,7 @@ open class OROptions: NSObject {
         self.wifiOnly = wifiOnly
         self.debugLogs = debugLogs
         self.debugImages = debugImages
+        self.isBlur = isBlur
     }
 }
 
