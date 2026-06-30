@@ -30,7 +30,7 @@ open class ScreenshotManager {
     private var useFramesFormat = false
     // MARK: capture settings
     // should we blur out sensitive views, or place a solid box on top
-    private var isBlurMode = true
+    private var isBlurMode: Bool { openReplay.options.isBlur }
     private var blurRadius = 2.5
     // this affects how big the image will be compared to real phone screan.
     // we also can use default UIScreen.main.scale which is around 3.0 (dense pixel screen)
