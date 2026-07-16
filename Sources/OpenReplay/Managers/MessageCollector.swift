@@ -210,6 +210,13 @@ class MessageCollector: NSObject {
         }
     }
 
+    private func isReplay(_ data: Data) -> Bool {
+        // orReplayerMessageTypes is generated from the :replayer flags in messages.rb.
+        // Unknown/undecodable type falls back to analytics so it can't corrupt the player timeline.
+        guard let type = data.peekMessageType() else { return false }
+        return orReplayerMessageTypes.contains(type)
+    }
+
     /// Must be called on workQueue.
     private func flushMessagesOnQueue() {
         guard !self.messagesWaiting.isEmpty else {
@@ -230,14 +237,48 @@ class MessageCollector: NSObject {
 
         guard !messages.isEmpty else { return }
 
-        let batchMeta = ORMobileBatchMeta(firstIndex: UInt64(self.nextMessageIndex))
-        var content = Data()
-        content.append(batchMeta.contentData())
-        messages.forEach { if !$0.isEmpty { content.append($0) } }
-        DebugUtils.log("messages batch \(batchMeta.description) bytes=\(content.count)")
+        // Group into replay (player, saved to mob file) and analytics (not saved).
+        let playerMessages = messages.filter { self.isReplay($0) }
+        let analyticsMessages = messages.filter { !self.isReplay($0) }
 
+        let batchMeta = ORMobileBatchMeta(firstIndex: UInt64(self.nextMessageIndex))
+
+        // Every batch uses the split layout: [batchMeta][player][analytics]. Reuse the
+        // BatchMeta Length field to carry the absolute byte offset where the analytics part
+        // starts; backend writes [0, offset) to the mob file and pushes [offset, end) to the
+        // DB. firstIndex follows as a bare trailing varint (backend special-cases type 107).
+        //   player-only    -> offset == whole batch  (everything to the mob file)
+        //   analytics-only -> offset == batchMeta size (nothing to the mob file)
+        //   mixed          -> offset == end of the player region
+        let typeBytes = Data(value: UInt64(107))
+        let tsBytes = Data(value: batchMeta.timestamp)
+        let firstIndexBytes = Data(value: batchMeta.firstIndex)
+        let playerBytes = playerMessages.reduce(0) { $0 + $1.count }
+        // offset includes the varint of offset itself (header is part of the file region),
+        // so resolve the self-reference by fixpoint — converges in <=2 steps.
+        let base = typeBytes.count + tsBytes.count + firstIndexBytes.count + playerBytes
+        var offset = base + Data(value: UInt64(base)).count
+        for _ in 0..<10 {
+            let cand = base + Data(value: UInt64(offset)).count
+            if cand == offset { break }
+            offset = cand
+        }
+
+        var content = Data()
+        content.append(typeBytes)
+        content.append(tsBytes)
+        content.append(Data(value: UInt64(offset)))   // Length field = analytics offset
+        content.append(firstIndexBytes)                // firstIndex, bare trailing varint
+        playerMessages.forEach { if !$0.isEmpty { content.append($0) } }
+        analyticsMessages.forEach { if !$0.isEmpty { content.append($0) } }
+        DebugUtils.log("split batch offset=\(offset) player=\(playerMessages.count) analytics=\(analyticsMessages.count) bytes=\(content.count)")
+
+        // Crash/late backup keeps the plain single-BatchMeta format.
         if self.sendingLastMessages, let fileUrl = self.lateMessagesFile {
-            try? content.write(to: fileUrl)
+            var flat = Data()
+            flat.append(batchMeta.contentData())
+            messages.forEach { if !$0.isEmpty { flat.append($0) } }
+            try? flat.write(to: fileUrl)
         }
 
         self.nextMessageIndex += messages.count

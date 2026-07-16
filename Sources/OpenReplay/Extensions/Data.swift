@@ -109,6 +109,27 @@ extension Data {
     private func readBoolean(offset: inout Int) throws -> Bool {
         return try readByte(offset: &offset) == 1
     }
+
+    /// Peek the leading varint of a serialized message (its type id) without consuming.
+    /// Returns nil if the buffer is empty or not a valid varint.
+    func peekMessageType() -> UInt64? {
+        var x: UInt64 = 0
+        var s: Int = 0
+        var i: Int = 0
+        var offset = 0
+        while offset < count {
+            let b = self[startIndex + offset]
+            offset += 1
+            if b < 0x80 {
+                if i > 9 || (i == 9 && b > 1) { return nil }
+                return x | UInt64(b) << s
+            }
+            x |= UInt64(b & 0x7f) << s
+            s += 7
+            i += 1
+        }
+        return nil
+    }
 }
 
 extension Data {
