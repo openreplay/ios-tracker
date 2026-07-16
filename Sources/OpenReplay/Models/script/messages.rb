@@ -1,30 +1,35 @@
-message 92, 'MobileMetadata' do
+# :replayer => true  -> player group (saved to the mob file / replay timeline)
+# :replayer => false -> analytics group (not saved to the mob file)
+# MobileBatchMeta is structural (the batch separator), tagged false so it stays
+# out of the replay type set.
+
+message 92, 'MobileMetadata', :replayer => false do
     uint 'Timestamp'
     uint 'Length'
     string 'Key'
     string 'Value'
 end
 
-message 93, 'MobileEvent' do
+message 93, 'MobileEvent', :replayer => true do
     uint 'Timestamp'
     uint 'Length'
     string 'Name'
     string 'Payload'
 end
 
-message 94, 'MobileUserID' do
+message 94, 'MobileUserID', :replayer => false do
     uint 'Timestamp'
     uint 'Length'
     string 'ID'
 end
 
-message 95, 'MobileUserAnonymousID' do
+message 95, 'MobileUserAnonymousID', :replayer => false do
     uint 'Timestamp'
     uint 'Length'
     string 'ID'
 end
 
-message 96, 'MobileScreenChanges' do
+message 96, 'MobileScreenChanges', :replayer => true do
     uint 'Timestamp'
     uint 'Length'
     uint 'X'
@@ -33,7 +38,7 @@ message 96, 'MobileScreenChanges' do
     uint 'Height'
 end
 
-message 97, 'MobileCrash' do
+message 97, 'MobileCrash', :replayer => false do
     uint 'Timestamp'
     uint 'Length'
     string 'Name'
@@ -41,7 +46,7 @@ message 97, 'MobileCrash' do
     string 'Stacktrace'
 end
 
-message 98, 'MobileViewComponentEvent' do
+message 98, 'MobileViewComponentEvent', :replayer => false do
     uint 'Timestamp'
     uint 'Length'
     string 'ScreenName'
@@ -49,7 +54,7 @@ message 98, 'MobileViewComponentEvent' do
     boolean 'Visible'
 end
 
-message 100, 'MobileClickEvent' do
+message 100, 'MobileClickEvent', :replayer => true do
     uint 'Timestamp'
     uint 'Length'
     string 'Label'
@@ -57,7 +62,7 @@ message 100, 'MobileClickEvent' do
     uint 'Y'
 end
 
-message 101, 'MobileInputEvent' do
+message 101, 'MobileInputEvent', :replayer => true do
     uint 'Timestamp'
     uint 'Length'
     string 'Value'
@@ -87,20 +92,20 @@ message 102, 'MobilePerformanceEvent', :replayer => true do
   uint 'Value'
 end
 
-message 103, 'MobileLog' do
+message 103, 'MobileLog', :replayer => true do
   uint 'Timestamp'
   uint 'Length'
   string 'Severity' # Possible values ("info", "error")
   string 'Content'
 end
 
-message 104, 'MobileInternalError' do
+message 104, 'MobileInternalError', :replayer => true do
   uint 'Timestamp'
   uint 'Length'
   string 'Content'
 end
 
-message 105, 'MobileNetworkCall' do
+message 105, 'MobileNetworkCall', :replayer => true do
    uint 'Timestamp'
    uint 'Length'
    string 'Type'
@@ -112,7 +117,7 @@ message 105, 'MobileNetworkCall' do
    uint 'Duration'
 end
 
-message 106, 'MobileSwipeEvent' do
+message 106, 'MobileSwipeEvent', :replayer => true do
     uint 'Timestamp'
     uint 'Length'
     string 'Label'
@@ -121,14 +126,14 @@ message 106, 'MobileSwipeEvent' do
     string 'Direction'
 end
 
-message 107, 'MobileBatchMeta' do
+message 107, 'MobileBatchMeta', :replayer => false do
     uint 'Timestamp'
     uint 'Length'
     uint 'FirstIndex'
 end
 
 
-message 109, 'GraphQL' do
+message 109, 'GraphQL', :replayer => true do
     uint 'Timestamp'
     uint 'Length'
     string 'OperationKind'

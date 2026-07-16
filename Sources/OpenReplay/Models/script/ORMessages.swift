@@ -21,6 +21,11 @@ enum ORMessageType: UInt64 {
     case graphQL = 109
 }
 
+// Message type ids in the replay/player group (saved to the mob file).
+// Every other type this tracker emits is analytics-only. Generated from the
+// :replayer flags in messages.rb.
+let orReplayerMessageTypes: Set<UInt64> = [93, 96, 100, 101, 102, 103, 104, 105, 106, 109]
+
 class ORMobileMetadata: ORMessage {
     let key: String
     let value: String

@@ -91,7 +91,7 @@ class Message
         name: name,
         type: type,
       )
-      @attributes << Attribute.new(opts)
+      @attributes << Attribute.new(**opts)
     end
   end
 end
@@ -103,7 +103,7 @@ def message(id, name, opts = {}, &block)
   $ids << id
   opts[:id] = id
   opts[:name] = name
-  msg = Message.new(opts, &block)
+  msg = Message.new(**opts, &block)
   $messages << msg
 end
 

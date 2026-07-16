@@ -5,6 +5,11 @@ import UIKit
 enum ORMessageType: UInt64 {
 <%= $messages.map { |msg| "    case #{msg.name.first_lower} = #{msg.id}" }.join "\n" %>
 }
+
+// Message type ids in the replay/player group (saved to the mob file).
+// Every other type this tracker emits is analytics-only. Generated from the
+// :replayer flags in messages.rb.
+let orReplayerMessageTypes: Set<UInt64> = [<%= $messages.select { |msg| msg.replayer }.map { |msg| msg.id }.join(", ") %>]
 <% $messages.each do |msg| %>
 class OR<%= msg.name.to_s.camel_case %>: ORMessage {
 <%= msg.attributes[2..-1].map { |attr| "    let #{attr.property}: #{attr.type_swift}" }.join "\n" %>
