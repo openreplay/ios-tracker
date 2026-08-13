@@ -1,5 +1,4 @@
 import UIKit
-import CommonCrypto
 
 protocol NSObjectCoding: NSCoding, NSObject {}
 
@@ -17,18 +16,6 @@ extension Data {
         if let data = string.data(using: .utf8) {
             append(data)
         }
-    }
-
-    func sha256() -> String {
-        var hash = [UInt8](repeating: 0,  count: Int(CC_SHA256_DIGEST_LENGTH))
-        self.withUnsafeBytes {
-            _ = CC_SHA256($0.baseAddress, CC_LONG(self.count), &hash)
-        }
-        return Data(hash).hexEncodedString()
-    }
-
-    func hexEncodedString() -> String {
-        return map { String(format: "%02hhx", $0) }.joined()
     }
 
     func subdata(start: Int, length: Int) -> Data? {
@@ -172,7 +159,7 @@ extension Data {
         }
         let length = count - oldLength
         if length == 0 && !(value is NSNull) {
-            print("Nothing was written for \(String(describing: type(of: value))):\(value) ")
+            DebugUtils.error("Nothing was written for \(String(describing: type(of: value))):\(value) ")
         }
     }
 

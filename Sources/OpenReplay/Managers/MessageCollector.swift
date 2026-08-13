@@ -14,19 +14,17 @@ class MessageCollector: NSObject {
     private var nextMessageIndex = 0
     private var sendingLastMessages = false
     private let maxMessagesSize = 500_000
-    private let messagesQueue: OperationQueue = {
-       let q = OperationQueue()
-       q.maxConcurrentOperationCount = 1
-       q.qualityOfService = .utility
-       q.name = "com.openreplay.messageCollector.queue"
-       return q
-   }()
+    // Running total of messagesWaiting bytes — recomputing with reduce() on
+    // every append would make message ingestion O(n²).
+    private var waitingBytes = 0
+    // Single serial queue owning ALL collector state. The previous mix of a
+    // serial OperationQueue nested inside a concurrent barrier queue created two
+    // competing mutual-exclusion domains and data races (sendingLastMessages).
+    private let workQueue = DispatchQueue(label: "com.openreplay.messageCollector", qos: .utility)
     private let lateMessagesFile: URL?
     private var sendInterval: Timer?
     private var bufferTimer: Timer?
-    private var catchUpTimer: Timer?
     private var tick = 0
-    private let queue = DispatchQueue(label: "com.messageCollector.queue", attributes: .concurrent)
 
     override init() {
         lateMessagesFile = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("lateMessages.dat")
@@ -34,9 +32,10 @@ class MessageCollector: NSObject {
     }
 
     func start() {
-        sendInterval = Timer.scheduledTimer(withTimeInterval: 5, repeats: true, block: { [weak self] _ in
+        sendInterval?.orInvalidate()
+        sendInterval = Timer.orScheduled(interval: 5) { [weak self] _ in
             self?.flush()
-        })
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(terminate), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(terminate), name: UIApplication.willTerminateNotification, object: nil)
 
@@ -51,28 +50,29 @@ class MessageCollector: NSObject {
     }
 
     func cycleBuffer() {
-        bufferTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true, block: { [weak self] _ in
+        bufferTimer?.orInvalidate()
+        bufferTimer = Timer.orScheduled(interval: 30) { [weak self] _ in
             guard let self = self else { return }
             Openreplay.shared.sessionStartTs = UInt64(Date().timeIntervalSince1970 * 1000)
             if Openreplay.shared.bufferingMode {
-                self.queue.async(flags: .barrier) {
-                    let currTick = self.tick
-                    if (currTick % 2 == 0) {
+                self.workQueue.async {
+                    if (self.tick % 2 == 0) {
                         self.messagesWaiting = []
+                        self.waitingBytes = 0
                     } else {
                         self.messagesWaitingBackup = []
                     }
                     self.tick += 1
                 }
             }
-        })
+        }
     }
 
     func syncBuffers() {
-        bufferTimer?.invalidate()
+        bufferTimer?.orInvalidate()
         bufferTimer = nil
 
-        queue.async(flags: .barrier) {
+        workQueue.async {
             let buf1 = self.messagesWaiting.count
             let buf2 = self.messagesWaitingBackup.count
             self.tick = 0
@@ -83,61 +83,64 @@ class MessageCollector: NSObject {
                 self.messagesWaiting = self.messagesWaitingBackup
                 self.messagesWaitingBackup.removeAll()
             }
+            self.waitingBytes = self.messagesWaiting.reduce(0) { $0 + $1.count }
 
-            self.flushMessages()
+            self.flushMessagesOnQueue()
         }
     }
-    
+
     func stop() {
         DebugUtils.log("stopping sender")
-        sendInterval?.invalidate()
+        sendInterval?.orInvalidate(); sendInterval = nil
         NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIApplication.willTerminateNotification,  object: nil)
-        bufferTimer?.invalidate(); bufferTimer = nil
-        catchUpTimer?.invalidate(); catchUpTimer = nil
-        debounceTimer?.invalidate(); debounceTimer = nil
+        bufferTimer?.orInvalidate(); bufferTimer = nil
+        debounceTimer?.orInvalidate(); debounceTimer = nil
         self.terminate()
     }
 
     func sendImagesBatch(batch: Data, fileName: String) {
-        messagesQueue.addOperation {
+        workQueue.async {
             if self.imagesWaiting.count >= 200 {
-                let overflow = self.imagesWaiting.count - 199
-                self.imagesWaiting.removeFirst(overflow)
+                self.imagesWaiting.removeFirst(self.imagesWaiting.count - 199)
             }
-        self.imagesWaiting.append(BatchArch(name: fileName, data: batch))
-        self.flushImages()
+            self.imagesWaiting.append(BatchArch(name: fileName, data: batch))
+            self.flushImagesOnQueue()
         }
     }
 
     @objc func terminate() {
-        guard !sendingLastMessages else { return }
-        messagesQueue.addOperation {
+        workQueue.async {
+            guard !self.sendingLastMessages else { return }
             self.sendingLastMessages = true
-            self.flushMessages()
-            self.flushImages()
+            self.flushMessagesOnQueue()
+            self.flushImagesOnQueue()
         }
     }
 
     @objc func flush() {
-        messagesQueue.addOperation {
-            self.flushMessages()
-            self.flushImages()
+        workQueue.async {
+            self.flushMessagesOnQueue()
+            self.flushImagesOnQueue()
         }
     }
 
-    private func flushImages() {
-        let images = imagesWaiting.first
-        guard !imagesWaiting.isEmpty, let images = images, let projectKey = Openreplay.shared.projectKey else { return }
-        imagesWaiting.remove(at: 0)
+    /// Must be called on workQueue.
+    private func flushImagesOnQueue() {
+        guard let images = imagesWaiting.first, let projectKey = Openreplay.shared.projectKey else { return }
+        imagesWaiting.removeFirst()
         imagesSending.append(images)
 
         DebugUtils.log("Sending images \(images.name) \(images.data.count)")
-        NetworkManager.shared.sendImages(projectKey: projectKey, images: images.data, name: images.name) { (success) in
-            self.messagesQueue.addOperation {
+        NetworkManager.shared.sendImages(projectKey: projectKey, images: images.data, name: images.name) { (success, shouldRetry) in
+            self.workQueue.async {
                 self.imagesSending.removeAll { waiting in images.name == waiting.name }
                 guard success else {
-                    self.imagesWaiting.insert(images, at: 0)
+                    if shouldRetry {
+                        self.imagesWaiting.insert(images, at: 0)
+                    } else {
+                        DebugUtils.error("Dropping image batch \(images.name) after permanent server rejection")
+                    }
                     return
                 }
             }
@@ -161,14 +164,14 @@ class MessageCollector: NSObject {
         }
         self.sendRawMessage(data)
     }
-    
+
     private var debounceTimer: Timer?
     private var debouncedMessage: ORMessage?
     func sendDebouncedMessage(_ message: ORMessage) {
-        debounceTimer?.invalidate()
+        debounceTimer?.orInvalidate()
 
         debouncedMessage = message
-        debounceTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+        debounceTimer = Timer.orScheduled(interval: 2.0, repeats: false) { [weak self] _ in
             if let debouncedMessage = self?.debouncedMessage {
                 self?.sendMessage(debouncedMessage)
                 self?.debouncedMessage = nil
@@ -177,70 +180,81 @@ class MessageCollector: NSObject {
     }
 
     func sendRawMessage(_ data: Data) {
-        messagesQueue.addOperation {
-            self.queue.async(flags: .barrier) {
-                if self.messagesWaiting.count >= 10_000 {
-                    DebugUtils.log("Message queue size exceeded, dropping message")
-                    return
+        workQueue.async {
+            if self.messagesWaiting.count >= 10_000 {
+                DebugUtils.log("Message queue size exceeded, dropping message")
+                return
+            }
+            if data.count > self.maxMessagesSize {
+                DebugUtils.log("<><><>Single message size exceeded limit")
+                return
+            }
+            self.messagesWaiting.append(data)
+            self.waitingBytes += data.count
+            if Openreplay.shared.bufferingMode {
+                self.messagesWaitingBackup.append(data)
+            }
+            let hardCapBytes = self.maxMessagesSize * 6 // ~3MB cap at 500KB batch size
+            if self.waitingBytes > hardCapBytes {
+                var shed = 0
+                while self.waitingBytes > hardCapBytes && !self.messagesWaiting.isEmpty {
+                    let removed = self.messagesWaiting.removeFirst().count
+                    shed += removed
+                    self.waitingBytes -= removed
                 }
-                if data.count > self.maxMessagesSize {
-                    DebugUtils.log("<><><>Single message size exceeded limit")
-                    return
-                }
-                self.messagesWaiting.append(data)
-                if Openreplay.shared.bufferingMode {
-                    self.messagesWaitingBackup.append(data)
-                }
-                let totalWaitingSize = self.messagesWaiting.reduce(0) { $0 + $1.count }
-                let hardCapBytes = self.maxMessagesSize * 6 // ~3MB cap at 500KB batch size
-                if totalWaitingSize > hardCapBytes {
-                    var shed = 0
-                    while shed < (totalWaitingSize - hardCapBytes) && !self.messagesWaiting.isEmpty {
-                        shed += self.messagesWaiting.removeFirst().count
-                    }
-                    DebugUtils.log("Dropped \(shed) bytes from message backlog to cap memory")
-                }
-                if !Openreplay.shared.bufferingMode && totalWaitingSize > Int(Double(self.maxMessagesSize) * 0.8) {
-                    self.flushMessages()
-                }
+                DebugUtils.log("Dropped \(shed) bytes from message backlog to cap memory")
+            }
+            if !Openreplay.shared.bufferingMode && self.waitingBytes > Int(Double(self.maxMessagesSize) * 0.8) {
+                self.flushMessagesOnQueue()
             }
         }
     }
 
-    private func flushMessages() {
-        queue.async(flags: .barrier) {
-            guard !self.messagesWaiting.isEmpty else { return }
-            
-            var messages = [Data]()
-            var sentSize = 0
-            while let message = self.messagesWaiting.first, sentSize + message.count <= self.maxMessagesSize {
-                messages.append(message)
-                self.messagesWaiting.remove(at: 0)
-                sentSize += message.count
-            }
-            
-            guard !messages.isEmpty else { return }
-            
-            var content = Data()
-            let index = ORMobileBatchMeta(firstIndex: UInt64(self.nextMessageIndex))
-            content.append(index.contentData())
-            DebugUtils.log(index.description)
-            messages.forEach { (message) in
-              if !message.isEmpty {
-                content.append(message)
-              }
-            }
-            if self.sendingLastMessages, let fileUrl = self.lateMessagesFile {
-                try? content.write(to: fileUrl)
-            }
-            self.nextMessageIndex += messages.count
-            DebugUtils.log("messages batch \(content)")
-            NetworkManager.shared.sendMessage(content: content) { (success) in
+    /// Must be called on workQueue.
+    private func flushMessagesOnQueue() {
+        guard !self.messagesWaiting.isEmpty else {
+            // Nothing left to persist, so a terminate pass over an empty queue is
+            // already complete — don't leave the flag latched.
+            self.sendingLastMessages = false
+            return
+        }
+
+        var messages = [Data]()
+        var sentSize = 0
+        while let message = self.messagesWaiting.first, sentSize + message.count <= self.maxMessagesSize {
+            messages.append(message)
+            self.messagesWaiting.removeFirst()
+            self.waitingBytes -= message.count
+            sentSize += message.count
+        }
+
+        guard !messages.isEmpty else { return }
+
+        let batchMeta = ORMobileBatchMeta(firstIndex: UInt64(self.nextMessageIndex))
+        var content = Data()
+        content.append(batchMeta.contentData())
+        messages.forEach { if !$0.isEmpty { content.append($0) } }
+        DebugUtils.log("messages batch \(batchMeta.description) bytes=\(content.count)")
+
+        if self.sendingLastMessages, let fileUrl = self.lateMessagesFile {
+            try? content.write(to: fileUrl)
+        }
+
+        self.nextMessageIndex += messages.count
+        NetworkManager.shared.sendMessage(content: content) { (success, shouldRetry) in
+            self.workQueue.async {
                 guard success else {
-                    DebugUtils.log("<><>re-sending failed batch<><>")
-                    self.queue.async(flags: .barrier) {
-                        self.messagesWaiting.insert(contentsOf: messages, at: 0)
+                    guard shouldRetry else {
+                        DebugUtils.error("Dropping message batch after permanent server rejection")
+                        // The batch is gone for good, so the terminate pass is over:
+                        // leaving the flag set would make every later batch rewrite
+                        // the late-messages file.
+                        self.sendingLastMessages = false
+                        return
                     }
+                    DebugUtils.log("<><>re-sending failed batch<><>")
+                    self.messagesWaiting.insert(contentsOf: messages, at: 0)
+                    self.waitingBytes += sentSize
                     return
                 }
                 if self.sendingLastMessages {
@@ -253,11 +267,3 @@ class MessageCollector: NSObject {
         }
     }
 }
-
-extension Data {
-    func hexString() -> String {
-        return map { String(format: "%02x", $0) }.joined()
-    }
-}
-
-

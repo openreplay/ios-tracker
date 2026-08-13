@@ -3,6 +3,9 @@ import UIKit
 public class Crashs: NSObject {
     public static let shared = Crashs()
     private static var fileUrl: URL? = nil
+    // Handler installed before ours (Crashlytics, Sentry, ...) — must be chained,
+    // otherwise this SDK silently disables the app's other crash reporters.
+    private static var previousHandler: (@convention(c) (NSException) -> Void)? = nil
     private var isActive = false
     
     private override init() {
@@ -20,22 +23,19 @@ public class Crashs: NSObject {
     }
 
     public func start() {
+        guard !isActive else { return }
+        Crashs.previousHandler = NSGetUncaughtExceptionHandler()
         NSSetUncaughtExceptionHandler { (exception) in
             DebugUtils.log("<><> captured crash \(exception)")
             let message = ORMobileCrash(name: exception.name.rawValue,
                                      reason: exception.reason ?? "",
                                      stacktrace: exception.callStackSymbols.joined(separator: "\n"))
-            let messageData = message.contentData()
+            // Disk only: the process dies when this handler returns, so async
+            // network work never completes. The file is sent via /late on next launch.
             if let fileUrl = Crashs.fileUrl {
-                try? messageData.write(to: fileUrl)
+                try? message.contentData().write(to: fileUrl)
             }
-            NetworkManager.shared.sendMessage(content: messageData) { (success) in
-                guard success else { return }
-                if let fileUrl = Crashs.fileUrl,
-                   FileManager.default.fileExists(atPath: fileUrl.path) {
-                    try? FileManager.default.removeItem(at: fileUrl)
-                }
-            }
+            Crashs.previousHandler?(exception)
         }
         isActive = true
     }
@@ -56,9 +56,9 @@ public class Crashs: NSObject {
     
     public func stop() {
         if isActive {
-            NSSetUncaughtExceptionHandler(nil)
+            NSSetUncaughtExceptionHandler(Crashs.previousHandler)
+            Crashs.previousHandler = nil
             isActive = false
         }
-        
     }
 }

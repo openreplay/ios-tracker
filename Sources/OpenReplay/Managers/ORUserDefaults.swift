@@ -24,10 +24,19 @@ class ORUserDefaults: NSObject {
 
     var lastToken: String? {
         get {
-            return userDefaults?.string(forKey: "lastToken")
+            if let token = ORKeychain.get("lastToken") {
+                return token
+            }
+            // Migrate a token stored by older SDK versions in UserDefaults
+            if let legacy = userDefaults?.string(forKey: "lastToken") {
+                ORKeychain.set(legacy, forKey: "lastToken")
+                userDefaults?.removeObject(forKey: "lastToken")
+                return legacy
+            }
+            return nil
         }
         set {
-            userDefaults?.set(newValue, forKey: "lastToken")
+            ORKeychain.set(newValue, forKey: "lastToken")
         }
     }
 }

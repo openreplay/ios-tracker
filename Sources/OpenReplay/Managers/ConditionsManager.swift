@@ -25,6 +25,13 @@ struct Condition {
 class ConditionsManager: NSObject {
     public static let shared = ConditionsManager()
     private var mappedConditions: [Condition] = []
+    private var durationTimers: [Timer] = []
+
+    func stop() {
+        durationTimers.forEach { $0.orInvalidate() }
+        durationTimers.removeAll()
+        mappedConditions.removeAll()
+    }
     
     func processMessage(msg: ORMessage) -> String? {
         guard let messageType = msg.message else { return nil }
@@ -176,15 +183,17 @@ class ConditionsManager: NSObject {
     }
     
     func durationCond(dur: [String], name: String) {
-        var timer: Timer? = nil
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true, block: { (_) in
-            let now = UInt64(Date().timeIntervalSince1970 * 1000)
-            let diff = now - Openreplay.shared.sessionStartTs
+        // Own monotonic anchor: sessionStartTs is reset every 30s by cycleBuffer
+        // during buffering mode, and wall clock can step backwards (underflow trap).
+        let anchor = DispatchTime.now()
+        let timer = Timer.orScheduled(interval: 1) { timer in
+            let diff = (DispatchTime.now().uptimeNanoseconds - anchor.uptimeNanoseconds) / 1_000_000
             if dur.first(where: { UInt64($0) ?? 9999999 <= diff }) != nil {
                 Openreplay.shared.triggerRecording(condition: name)
-                timer?.invalidate()
+                timer.invalidate()
             }
-        })
+        }
+        durationTimers.append(timer)
     }
 }
 

@@ -15,9 +15,12 @@ open class Openreplay: NSObject {
     private var sessionData: ORSessionResponse?
     public var sessionStartTs: UInt64 = 0
     public var trackerState = CheckState.unchecked
-    private var networkCheckTimer: Timer?
     public var bufferingMode = false
     private var pathMonitor: NWPathMonitor?
+    private var sessionStartRequested = false
+    // Flipped by the path monitor when wifiOnly is set and the device is on
+    // cellular — uploads pause (batches stay queued) until WiFi returns.
+    var uploadsAllowed = true
     public var serverURL: String {
         get { NetworkManager.shared.baseUrl }
         set { NetworkManager.shared.baseUrl = newValue }
@@ -27,9 +30,14 @@ open class Openreplay: NSObject {
     @objc open func start(projectKey: String, options: OROptions) {
         self.options = options
         self.projectKey = projectKey
+        self.sessionStartRequested = false
+        self.pathMonitor?.cancel()
         self.pathMonitor = NWPathMonitor()
-        let q = DispatchQueue.global(qos: .utility)
 
+        // NWPathMonitor is push-based — the session starts straight from the first
+        // satisfying path update. It keeps monitoring afterwards: if the app launches
+        // on cellular with wifiOnly set, recording starts once WiFi appears, and
+        // uploads pause/resume on later network changes.
         self.pathMonitor?.pathUpdateHandler = { [weak self] path in
             guard let self = self else { return }
 
@@ -39,37 +47,52 @@ open class Openreplay: NSObject {
                         PerformanceListener.shared.networkStateChange(1)
                     }
                     self.trackerState = .canStart
+                    self.uploadsAllowed = true
                 } else if path.usesInterfaceType(.cellular) {
                     if PerformanceListener.shared.isActive {
                         PerformanceListener.shared.networkStateChange(0)
                     }
                     if options.wifiOnly {
                         self.trackerState = .cantStart
+                        self.uploadsAllowed = false
                         print("Connected to Cellular and options.wifiOnly is true. Openreplay will not start.")
                     } else {
                         self.trackerState = .canStart
+                        self.uploadsAllowed = true
                     }
                 } else {
                     self.trackerState = .cantStart
+                    // No usable interface: hold the batches instead of dispatching
+                    // uploads that can only fail and be requeued.
+                    self.uploadsAllowed = false
                     print("Not connected to either WiFi or Cellular. Openreplay will not start.")
+                }
+
+                if self.trackerState == .canStart && !self.sessionStartRequested {
+                    self.sessionStartRequested = true
+                    self.startSession(projectKey: projectKey, options: options)
                 }
             }
         }
 
-        self.pathMonitor?.start(queue: q)
+        self.pathMonitor?.start(queue: DispatchQueue.global(qos: .utility))
+    }
 
-        DispatchQueue.main.async {
-            self.networkCheckTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-                if self.trackerState == .canStart {
-                    self.startSession(projectKey: projectKey, options: options)
-                    self.networkCheckTimer?.invalidate()
-                    self.networkCheckTimer = nil
-                }
-                if self.trackerState == .cantStart {
-                    self.networkCheckTimer?.invalidate()
-                    self.networkCheckTimer = nil
-                }
+    /// Shared listener wiring for session start, cold start, and foreground resume.
+    func startListeners(options: OROptions) {
+        if options.logs {
+            if #available(iOS 13.4, *) {
+                LogsListener.shared.start()
             }
+        }
+        if options.crashes {
+            Crashs.shared.start()
+        }
+        if options.performances {
+            PerformanceListener.shared.start()
+        }
+        if options.analytics {
+            Analytics.shared.start()
         }
     }
     
@@ -83,29 +106,10 @@ open class Openreplay: NSObject {
             ScreenshotManager.shared.setSettings(settings: captureSettings)
             
             MessageCollector.shared.start()
-            
-            if options.logs {
-                if #available(iOS 13.4, *) {
-                    LogsListener.shared.start()
-                } else {
-                    // Fallback on earlier versions
-                }
-            }
-            
-            if options.crashes {
-                Crashs.shared.start()
-            }
-            
-            if options.performances {
-                PerformanceListener.shared.start()
-            }
-            
+            self.startListeners(options: options)
+
             if options.screen {
                 ScreenshotManager.shared.start(startTs: self.sessionStartTs, framesSupport: sessionResponse.framesSupport ?? false)
-            }
-
-            if options.analytics {
-                Analytics.shared.start()
             }
         }
     }
@@ -122,31 +126,12 @@ open class Openreplay: NSObject {
             let captureSettings = getCaptureSettings(fps: sessionResponse.fps, quality: sessionResponse.quality)
 
             MessageCollector.shared.cycleBuffer()
+            self.startListeners(options: options)
 
-            if options.logs {
-                if #available(iOS 13.4, *) {
-                    LogsListener.shared.start()
-                } else {
-                    // Fallback on earlier versions
-                }
-            }
-            
-            if options.crashes {
-                Crashs.shared.start()
-            }
-            
-            if options.performances {
-                PerformanceListener.shared.start()
-            }
-            
             if options.screen {
                 ScreenshotManager.shared.setSettings(settings: captureSettings)
                 ScreenshotManager.shared.start(startTs: self.sessionStartTs, framesSupport: sessionResponse.framesSupport ?? false)
                 ScreenshotManager.shared.cycleBuffer()
-            }
-            
-            if options.analytics {
-                Analytics.shared.start()
             }
         }
     }
@@ -166,17 +151,22 @@ open class Openreplay: NSObject {
     }
     
     @objc open func stop() {
-        networkCheckTimer?.invalidate()
-        networkCheckTimer = nil
-
         pathMonitor?.cancel()
         pathMonitor = nil
+        sessionStartRequested = false
+        // Nothing is monitoring the path anymore, so leave uploads unblocked for
+        // any explicit call after stop() (e.g. sendLateMessage on next start).
+        uploadsAllowed = true
 
         MessageCollector.shared.stop()
         ScreenshotManager.shared.stop()
         Crashs.shared.stop()
-        PerformanceListener.shared.stop()
+        PerformanceListener.shared.stop(disableLifecycle: true)
         Analytics.shared.stop()
+        ConditionsManager.shared.stop()
+        if #available(iOS 13.4, *) {
+            LogsListener.shared.stop()
+        }
     }
     
     @objc open func addIgnoredView(_ view: UIView) {
@@ -198,6 +188,8 @@ open class Openreplay: NSObject {
            let data = payload.toJSONData(),
            let jsonStr = String(data: data, encoding: .utf8) {
             json = jsonStr
+        } else if payload != nil {
+            DebugUtils.error("event '\(name)': payload is not Encodable, sending empty payload")
         }
         let message = ORMobileEvent(name: name, payload: json)
         MessageCollector.shared.sendMessage(message)
@@ -239,7 +231,8 @@ open class Openreplay: NSObject {
 
             let operationKind = dict["operationKind"] as? String ?? ""
             let operationName = dict["operationName"] as? String ?? ""
-            let duration = UInt64(dict["duration"] as? Int ?? 0)
+            // UInt64(negative) traps at runtime — clamp integrator-supplied values
+            let duration = UInt64(max(0, dict["duration"] as? Int ?? 0))
 
             var variablesString = ""
             if let variablesObj = dict["variables"],

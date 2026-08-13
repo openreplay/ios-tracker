@@ -26,16 +26,9 @@ class ORSessionRequest: NSObject {
             ]
             
             let device = Device.current
-            var deviceModel = ""
-            var deviceSafeName = ""
-            
-            if device.isSimulator {
-                deviceSafeName = "iPhone 14 Pro"
-                deviceModel = "iPhone14,8"
-            } else {
-                deviceSafeName = device.safeDescription
-                deviceModel = Device.identifier
-            }
+            // safeDescription reports simulators honestly, e.g. "Simulator (iPhone 15)"
+            let deviceSafeName = device.safeDescription
+            let deviceModel = Device.identifier
             
             let screenWidth = UIScreen.main.bounds.width
             let screenHeight = UIScreen.main.bounds.height
@@ -61,12 +54,20 @@ class ORSessionRequest: NSObject {
         }
     }
 
-    private static func callAPI(completion: @escaping (ORSessionResponse?) -> Void) {
+    private static func callAPI(attempt: Int = 0, completion: @escaping (ORSessionResponse?) -> Void) {
         guard !params.isEmpty else { return }
         NetworkManager.shared.createSession(params: params) { (sessionResponse) in
             guard let sessionResponse = sessionResponse else {
-                DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
-                    callAPI(completion: completion)
+                let maxAttempts = 10
+                guard attempt < maxAttempts else {
+                    DebugUtils.error("Could not start session after \(maxAttempts) attempts, giving up")
+                    return completion(nil)
+                }
+                // Exponential backoff capped at 60s — a fixed 5s loop hammers the
+                // backend (and the battery) forever when the server is down.
+                let delay = min(60.0, 5.0 * pow(2.0, Double(attempt)))
+                DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
+                    callAPI(attempt: attempt + 1, completion: completion)
                 }
                 return
             }

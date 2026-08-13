@@ -1,16 +1,28 @@
 import UIKit
 
 open class NetworkListener: NSObject {
-    private let startTime: UInt64
+    // Monotonic clock: wall clock (Date) can step backwards on NTP sync,
+    // which would underflow the UInt64 duration math and crash.
+    private let startTime = DispatchTime.now()
     private var url: String = ""
     private var method: String = ""
     private var requestBody: String?
     private var requestHeaders: [String: String]?
-    var ignoredKeys = ["password"]
-    var ignoredHeaders = ["Authentication", "Auth"]
+    /// JSON body keys whose values are masked before recording (case-insensitive).
+    public var ignoredKeys = ["password"]
+    /// Headers whose values are masked before recording (case-insensitive).
+    public var ignoredHeaders = [
+        "Authorization",
+        "Proxy-Authorization",
+        "Cookie",
+        "Set-Cookie",
+        "Authentication",
+        "Auth",
+        "X-Api-Key",
+    ]
 
     public override init() {
-        startTime = UInt64(Date().timeIntervalSince1970 * 1000)
+        super.init()
     }
 
     public convenience init(request: URLRequest) {
@@ -45,7 +57,7 @@ open class NetworkListener: NSObject {
     }
 
     open func finish(response: URLResponse?, data: Data?) {
-        let endTime = UInt64(Date().timeIntervalSince1970 * 1000)
+        let dur = (DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000
         let httpResponse = response as? HTTPURLResponse
 
         var responseBody: String? = nil
@@ -79,33 +91,61 @@ open class NetworkListener: NSObject {
         let responseJSON = convertDictionaryToJSONString(dictionary: responseContent) ?? ""
 
         let status = httpResponse?.statusCode ?? 0
-        let dur = endTime - startTime
         sendNetworkMessage(url: url, method: method, requestJSON: requestJSON, responseJSON: responseJSON, status: status, duration: dur)
     }
 
-    private func sanitizeHeaders(headers: [String: String]?) -> [String: String]? {
+    // internal (not private) so the masking rules are unit-testable
+    func sanitizeHeaders(headers: [String: String]?) -> [String: String]? {
         guard let headerContent = headers else { return nil }
 
+        // HTTP header names are case-insensitive — "authorization" must match "Authorization"
+        let masked = Set(ignoredHeaders.map { $0.lowercased() })
         var sanitizedHeaders = headerContent
-        for key in ignoredKeys {
-            if sanitizedHeaders.keys.contains(key) {
-                sanitizedHeaders[key] = "***"
-            }
+        for key in sanitizedHeaders.keys where masked.contains(key.lowercased()) {
+            sanitizedHeaders[key] = "***"
         }
         return sanitizedHeaders
     }
 
-    
-    private func sanitizeBody(body: String?) -> String? {
+    func sanitizeBody(body: String?) -> String? {
         guard let bodyContent = body else { return nil }
 
+        // JSON-aware path: parse, mask ignored keys recursively (handles nesting,
+        // arrays, non-string values, and any whitespace/formatting), re-serialize.
+        if let data = bodyContent.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data),
+           let maskedData = try? JSONSerialization.data(withJSONObject: maskJSONValue(json)),
+           let maskedString = String(data: maskedData, encoding: .utf8) {
+            return maskedString
+        }
+
+        // Fallback for non-JSON bodies: whitespace-tolerant regex, all occurrences.
         var sanitizedBody = bodyContent
         for key in ignoredKeys {
-            if let range = sanitizedBody.range(of: "\"\(key)\":\"[^\"]*\"", options: .regularExpression) {
-                sanitizedBody.replaceSubrange(range, with: "\"\(key)\":\"***\"")
-            }
+            let escaped = NSRegularExpression.escapedPattern(for: key)
+            let pattern = "\"\(escaped)\"\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|[^,}\\]\\s]+)"
+            sanitizedBody = sanitizedBody.replacingOccurrences(
+                of: pattern,
+                with: "\"\(key)\":\"***\"",
+                options: [.regularExpression, .caseInsensitive]
+            )
         }
         return sanitizedBody
+    }
+
+    func maskJSONValue(_ value: Any) -> Any {
+        if let dict = value as? [String: Any] {
+            let masked = Set(ignoredKeys.map { $0.lowercased() })
+            var result = [String: Any]()
+            for (key, nested) in dict {
+                result[key] = masked.contains(key.lowercased()) ? "***" : maskJSONValue(nested)
+            }
+            return result
+        }
+        if let array = value as? [Any] {
+            return array.map { maskJSONValue($0) }
+        }
+        return value
     }
 }
 
@@ -123,7 +163,7 @@ public func sendNetworkMessage(url: String, method: String, requestJSON: String,
         URL: url,
         request: requestJSON,
         response: responseJSON,
-        status: UInt64(status),
+        status: UInt64(max(0, status)),
         duration: duration
     )
     
@@ -138,18 +178,4 @@ func transformHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {
         }
     }
     return stringHeaders
-}
-
-
-func isJSONString(string: String) -> Bool {
-    if let data = string.data(using: .utf8) {
-        do {
-            _ = try JSONSerialization.jsonObject(with: data, options: [])
-            return true
-        } catch {
-            DebugUtils.log("Error: \(error)")
-            return false
-        }
-    }
-    return false
 }

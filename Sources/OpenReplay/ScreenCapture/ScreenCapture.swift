@@ -14,13 +14,28 @@ open class ScreenshotManager {
         return q
     }()
 
+    // Off-main lane for mask compositing + JPEG encoding — only the UIKit render
+    // itself must run on the main thread.
+    private let processingQueue: OperationQueue = {
+        let q = OperationQueue()
+        q.maxConcurrentOperationCount = 1
+        q.qualityOfService = .utility
+        q.name = "com.openreplay.screenshots.processing"
+        return q
+    }()
+
     private var timer: Timer?
-    private var sendTimer: Timer?
     private let maxPendingBatches = 50
     private let maxBufferedScreenshots = 500
+    // Each queued operation retains a full-window UIImage (~2MB at scale 1.25 on a
+    // 6.1" screen). The old synchronous path self-throttled on the main thread;
+    // now that encoding is async, a slow encode must drop frames instead of
+    // growing the queue without bound.
+    private let maxPendingProcessing = 4
 
-    private var sanitizedElements: [Sanitizable] = []
-    private var observedInputs: [UITextField] = []
+    // Weak registry: a strong array would keep sanitized views alive after their
+    // screens are dismissed (leak) and scan dead entries forever.
+    private let sanitizedElements = NSHashTable<AnyObject>.weakObjects()
     private var screenshots: [(Data, UInt64)] = []
     private var screenshotsBackup: [(Data, UInt64)] = []
     private var tick: UInt64 = 0
@@ -45,15 +60,21 @@ open class ScreenshotManager {
         useFramesFormat = framesSupport
         startTakingScreenshots(every: settings.captureRate)
     }
+
+    /// Restart capture after foregrounding without resetting session timestamps,
+    /// capture settings, or the negotiated archive format.
+    func resume() {
+        startTakingScreenshots(every: settings.captureRate)
+    }
     
     func setSettings(settings: (captureRate: Double, imgCompression: Double)) {
         self.settings = settings
     }
     
     func stop() {
-        timer?.invalidate()
+        timer?.orInvalidate()
         timer = nil
-        bufferTimer?.invalidate()
+        bufferTimer?.orInvalidate()
         bufferTimer = nil
         stateLock.lock()
         lastTs = 0
@@ -64,8 +85,9 @@ open class ScreenshotManager {
     
     func startTakingScreenshots(every interval: TimeInterval) {
         takeScreenshot()
-        
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+
+        timer?.orInvalidate()
+        timer = Timer.orScheduled(interval: interval) { [weak self] _ in
             self?.takeScreenshot()
         }
     }
@@ -74,112 +96,131 @@ open class ScreenshotManager {
         if (openReplay.options.debugLogs) {
             DebugUtils.log("addSanitizedElement")
         }
-        sanitizedElements.append(element)
+        sanitizedElements.add(element)
     }
 
     public func removeSanitizedElement(_ element: Sanitizable) {
         if (openReplay.options.debugLogs) {
             DebugUtils.log("removeSanitizedElement")
         }
-        sanitizedElements.removeAll { $0 as AnyObject === element as AnyObject }
+        sanitizedElements.remove(element)
+    }
+
+    // Modern replacement for the deprecated UIApplication.shared.windows —
+    // resolves the key window of the active scene (correct on multi-window iPad).
+    private static func keyWindow() -> UIWindow? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
     }
 
     // MARK: - UI Capturing
     func takeScreenshot() {
-        autoreleasepool {
-            guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) else { return }
-            let size = window.frame.size
-            
-            guard size.width > 0 && size.height > 0 else { return }
-            UIGraphicsBeginImageContextWithOptions(size, false, screenScale)
-            guard let context = UIGraphicsGetCurrentContext() else { UIGraphicsEndImageContext(); return }
-            
-            // Rendering current window in custom context
-            // 2nd option looks to be more precise
-            //      window?.layer.render(in: context)
-            //         #warning("Can slow down the app depending on complexity of the UI tree")
+        guard let window = Self.keyWindow() else { return }
+        let size = window.frame.size
+        guard size.width > 0 && size.height > 0 else { return }
+
+        // Drop this frame rather than render one we can't keep up with encoding.
+        guard processingQueue.operationCount < maxPendingProcessing else {
+            DebugUtils.log("Dropping screenshot: encoder backlog")
+            return
+        }
+
+        // Pass 1 — main thread (UIKit requirement): render the window once.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = screenScale
+        format.opaque = true
+        let base = UIGraphicsImageRenderer(size: size, format: format).image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
-            
-            // MARK: sanitize
-            // Sanitizing sensitive elements
-            if isBlurMode {
+        }
+
+        // View geometry is main-thread-only: snapshot the sanitized frames here.
+        let maskFrames = sanitizedElements.allObjects.compactMap { ($0 as? Sanitizable)?.frameInWindow }
+
+        let ts = UInt64(Date().timeIntervalSince1970 * 1000)
+        let compression = settings.imgCompression
+        let blurMode = isBlurMode
+        let debugImages = openReplay.options.debugImages
+
+        // Pass 2 — background: compositing and JPEG encoding are the expensive
+        // parts and don't need UIKit, so they stay off the main thread.
+        processingQueue.addOperation { [weak self] in
+            guard let self = self else { return }
+            autoreleasepool {
+                let finalImage = self.applyMasks(to: base, frames: maskFrames, blurMode: blurMode, debugImages: debugImages)
+                guard let compressedData = finalImage.jpegData(compressionQuality: compression) else { return }
+
+                self.stateLock.lock()
+                if (self.openReplay.bufferingMode) {
+                    self.screenshotsBackup.append((compressedData, ts))
+                }
+                self.screenshots.append((compressedData, ts))
+                self.enforceScreenshotCaps()
+                let shouldSend = !self.openReplay.bufferingMode &&
+                    self.screenshots.count >= self.openReplay.options.screenshotBatchSize.rawValue
+                self.stateLock.unlock()
+                if shouldSend {
+                    self.sendScreenshots()
+                }
+            }
+        }
+    }
+
+    private func applyMasks(to base: UIImage, frames: [CGRect], blurMode: Bool, debugImages: Bool) -> UIImage {
+        guard !frames.isEmpty else { return base }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = base.scale
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: base.size, format: format).image { ctx in
+            base.draw(at: .zero)
+            let context = ctx.cgContext
+
+            if blurMode {
                 let stripeWidth: CGFloat = 5.0
                 let stripeSpacing: CGFloat = 15.0
                 let stripeColor: UIColor = .gray.withAlphaComponent(0.7)
-                
-                for element in sanitizedElements {
-                    if let frame = element.frameInWindow {
-                        let totalWidth = frame.size.width
-                        let totalHeight = frame.size.height
-                        let convertedFrame = CGRect(
-                            x: frame.origin.x,
-                            y: frame.origin.y,
-                            width: frame.size.width,
-                            height: frame.size.height
-                        )
-                        let cropFrame = CGRect(
-                            x: frame.origin.x * screenScale,
-                            y: frame.origin.y * screenScale,
-                            width: frame.size.width * screenScale,
-                            height: frame.size.height * screenScale
-                        )
-                        if let regionImage = UIGraphicsGetImageFromCurrentImageContext()?.cgImage?.cropping(to: cropFrame) {
-                            let imageToBlur = UIImage(cgImage: regionImage, scale: screenScale, orientation: .up)
-                            let blurredImage = imageToBlur.applyBlurWithRadius(blurRadius)
-                            blurredImage?.draw(in: convertedFrame)
-                            
-                            context.saveGState()
-                            UIRectClip(convertedFrame)
-                            
-                            // Draw diagonal lines within the clipped region
-                            for x in stride(from: -totalHeight, to: totalWidth, by: stripeSpacing + stripeWidth) {
-                                context.move(to: CGPoint(x: x + convertedFrame.minX, y: convertedFrame.minY))
-                                context.addLine(to: CGPoint(x: x + totalHeight + convertedFrame.minX, y: totalHeight + convertedFrame.minY))
-                            }
-                            
-                            context.setLineWidth(stripeWidth)
-                            stripeColor.setStroke()
-                            context.strokePath()
-                            context.restoreGState()
-                            
-                            if (openReplay.options.debugImages) {
-                                context.setStrokeColor(UIColor.black.cgColor)
-                                context.setLineWidth(1)
-                                context.stroke(convertedFrame)
-                            }
-                        }
-                    } else {
-                        removeSanitizedElement(element)
+
+                for frame in frames {
+                    // cgImage coordinates are in pixels, frames are in points
+                    let cropFrame = CGRect(
+                        x: frame.origin.x * base.scale,
+                        y: frame.origin.y * base.scale,
+                        width: frame.size.width * base.scale,
+                        height: frame.size.height * base.scale
+                    )
+                    if let regionImage = base.cgImage?.cropping(to: cropFrame) {
+                        let imageToBlur = UIImage(cgImage: regionImage, scale: base.scale, orientation: .up)
+                        imageToBlur.applyBlurWithRadius(blurRadius)?.draw(in: frame)
+                    }
+
+                    context.saveGState()
+                    context.clip(to: frame)
+
+                    // Draw diagonal lines within the clipped region
+                    let totalWidth = frame.size.width
+                    let totalHeight = frame.size.height
+                    for x in stride(from: -totalHeight, to: totalWidth, by: stripeSpacing + stripeWidth) {
+                        context.move(to: CGPoint(x: x + frame.minX, y: frame.minY))
+                        context.addLine(to: CGPoint(x: x + totalHeight + frame.minX, y: totalHeight + frame.minY))
+                    }
+
+                    context.setLineWidth(stripeWidth)
+                    stripeColor.setStroke()
+                    context.strokePath()
+                    context.restoreGState()
+
+                    if debugImages {
+                        context.setStrokeColor(UIColor.black.cgColor)
+                        context.setLineWidth(1)
+                        context.stroke(frame)
                     }
                 }
             } else {
                 context.setFillColor(UIColor.blue.cgColor)
-                for element in sanitizedElements {
-                    if let frame = element.frameInWindow {
-                        context.fill(frame)
-                    }
-                }
+                frames.forEach { context.fill($0) }
             }
-            
-            // Get the resulting image
-            if let image = UIGraphicsGetImageFromCurrentImageContext() {
-                if let compressedData = image.jpegData(compressionQuality: self.settings.imgCompression) {
-                    let ts = UInt64(Date().timeIntervalSince1970 * 1000)
-                    stateLock.lock()
-                    if (openReplay.bufferingMode) {
-                        self.screenshotsBackup.append((compressedData, ts))
-                    }
-                    self.screenshots.append((compressedData, ts))
-                    self.enforceScreenshotCaps()
-                    let shouldSend = !openReplay.bufferingMode &&
-                        self.screenshots.count >= openReplay.options.screenshotBatchSize.rawValue
-                    stateLock.unlock()
-                    if shouldSend {
-                        self.sendScreenshots()
-                    }
-                }
-            }
-            UIGraphicsEndImageContext()
         }
     }
     
@@ -193,7 +234,8 @@ open class ScreenshotManager {
     }
     
     func cycleBuffer() {
-        bufferTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true, block: { [weak self] _ in
+        bufferTimer?.orInvalidate()
+        bufferTimer = Timer.orScheduled(interval: 30) { [weak self] _ in
             guard let self = self else { return }
             if Openreplay.shared.bufferingMode {
                 self.stateLock.lock()
@@ -206,7 +248,7 @@ open class ScreenshotManager {
                 self.tick += 1
                 self.stateLock.unlock()
             }
-        })
+        }
     }
 
     func syncBuffers() {
@@ -223,7 +265,7 @@ open class ScreenshotManager {
         }
         stateLock.unlock()
 
-        bufferTimer?.invalidate()
+        bufferTimer?.orInvalidate()
         bufferTimer = nil
 
         self.sendScreenshots()
@@ -287,7 +329,6 @@ open class ScreenshotManager {
                 var entries: [TarEntry] = []
                 var newLastTs = lastTsSnapshot
                 for imageData in images {
-                    print("\(firstTsSnapshot)_1_\(imageData.1).jpeg")
                     let filename = "\(firstTsSnapshot)_1_\(imageData.1).jpeg"
                     var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
                     tarEntry.info.permissions = Permissions(rawValue: 420)
@@ -311,128 +352,7 @@ open class ScreenshotManager {
     }
     
     
-    // MARK: -- SAVING LOCALLY
-    func saveScreenshotsLocally() {
-        guard let sessionId = NetworkManager.shared.sessionId else {
-            return
-        }
-
-        stateLock.lock()
-        let images = screenshots
-        screenshots.removeAll()
-        let lastTsSnapshot = self.lastTs
-        let firstTsSnapshot = self.firstTs
-        let framesFormat = self.useFramesFormat
-        stateLock.unlock()
-
-        let archiveName = "\(sessionId)-\(lastTsSnapshot)_LOCAL.tar.gz"
-        let localFilePath = "/Users/nikitamelnikov/Desktop/session/"
-        let desktopURL = URL(fileURLWithPath: localFilePath)
-        let archiveURL = desktopURL.appendingPathComponent(archiveName)
-
-        // Ensure the directory exists
-        let fileManager = FileManager.default
-        if !fileManager.fileExists(atPath: localFilePath) {
-            try? fileManager.createDirectory(at: desktopURL, withIntermediateDirectories: true, attributes: nil)
-        }
-
-        for imageData in images {
-            if (Openreplay.shared.options.debugImages) {
-                let filename = "sessSt_1_\(imageData.1).jpeg"
-                let fileURL = desktopURL.appendingPathComponent(filename)
-
-                do {
-                    try imageData.0.write(to: fileURL)
-                } catch {
-                    DebugUtils.log("Unexpected error: \(error).")
-                }
-            }
-        }
-        if (Openreplay.shared.options.debugLogs) {
-            DebugUtils.log("saved image files in \(localFilePath)")
-        }
-
-        messagesQueue.addOperation {
-            if framesFormat {
-                // New binary format
-                var binaryData = Data()
-                var newLastTs = lastTsSnapshot
-                for imageData in images {
-                    let timestamp = imageData.1
-                    let imageBytes = imageData.0
-                    let size = UInt32(imageBytes.count)
-
-                    binaryData.appendUInt64LE(timestamp)
-                    binaryData.appendUInt32LE(size)
-                    binaryData.append(imageBytes)
-
-                    newLastTs = timestamp
-                }
-
-                do {
-                    let filename = "\(firstTsSnapshot)_1.jpeg.frames"
-                    let gzData = try GzipArchive.archive(data: binaryData)
-
-                    if (Openreplay.shared.options.debugImages) {
-                        let framesFileURL = desktopURL.appendingPathComponent(filename + ".gz")
-                        try gzData.write(to: framesFileURL)
-                        DebugUtils.log("Frames file saved to \(framesFileURL.path)")
-                    }
-
-                    var tarEntry = TarContainer.Entry(
-                        info: .init(name: filename, type: .regular),
-                        data: gzData
-                    )
-                    tarEntry.info.permissions = Permissions(rawValue: 420)
-                    tarEntry.info.creationTime = Date()
-                    tarEntry.info.modificationTime = Date()
-
-                    let tarData = TarContainer.create(from: [tarEntry])
-                    let finalArchive = try GzipArchive.archive(data: tarData)
-
-                    if (Openreplay.shared.options.debugImages) {
-                        try finalArchive.write(to: archiveURL)
-                        DebugUtils.log("Archive saved to \(archiveURL.path)")
-                    }
-                    MessageCollector.shared.sendImagesBatch(batch: finalArchive, fileName: archiveName)
-                    self.stateLock.lock()
-                    self.lastTs = newLastTs
-                    self.stateLock.unlock()
-                } catch {
-                    DebugUtils.log("Error creating frames format archive: \(error)")
-                }
-            } else {
-                // Old tar format
-                var entries: [TarEntry] = []
-                var newLastTs = lastTsSnapshot
-                for imageData in images {
-                    let filename = "\(firstTsSnapshot)_1_\(imageData.1).jpeg"
-                    var tarEntry = TarContainer.Entry(info: .init(name: filename, type: .regular), data: imageData.0)
-                    tarEntry.info.permissions = Permissions(rawValue: 420)
-                    tarEntry.info.creationTime = Date()
-                    tarEntry.info.modificationTime = Date()
-
-                    entries.append(tarEntry)
-                    newLastTs = imageData.1
-                }
-                do {
-                    let gzData = try GzipArchive.archive(data: TarContainer.create(from: entries))
-
-                    if (Openreplay.shared.options.debugImages) {
-                        try gzData.write(to: archiveURL)
-                        DebugUtils.log("Archive saved to \(archiveURL.path)")
-                    }
-                    MessageCollector.shared.sendImagesBatch(batch: gzData, fileName: archiveName)
-                    self.stateLock.lock()
-                    self.lastTs = newLastTs
-                    self.stateLock.unlock()
-                } catch {
-                    DebugUtils.log("Error writing tar.gz data: \(error)")
-                }
-            }
-        }
     }
-}
 
 // MARK: making extensions for UI
 struct SensitiveViewWrapperRepresentable: UIViewRepresentable {
@@ -484,8 +404,9 @@ class SensitiveTextField: UITextField {
     }
 }
 
-// Protocol to make a UIView sanitizable
-public protocol Sanitizable {
+// Protocol to make a UIView sanitizable.
+// Class-bound so registered elements can be held weakly.
+public protocol Sanitizable: AnyObject {
     var frameInWindow: CGRect? { get }
 }
 
@@ -502,14 +423,3 @@ extension Data {
     }
 }
 
-
-func getCaptureSettings(for quality: RecordingQuality) -> (captureRate: Double, imgCompression: Double) {
-    switch quality {
-    case .Low:
-        return (captureRate: 1, imgCompression: 0.4)
-    case .Standard:
-        return (captureRate: 0.33, imgCompression: 0.5)
-    case .High:
-        return (captureRate: 0.20, imgCompression: 0.55)
-    }
-}

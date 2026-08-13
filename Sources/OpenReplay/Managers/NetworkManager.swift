@@ -13,6 +13,9 @@ class NetworkManager: NSObject {
     private var token: String? = nil
     public var writeToFile = false
     private var framesSupport = false
+    // Guards against a 401 storm: N queued requests failing at once must not
+    // spawn N parallel session restarts. Reset when a new session is created.
+    private var isRestartingSession = false
     
     private lazy var session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
@@ -23,17 +26,22 @@ class NetworkManager: NSObject {
         return URLSession(configuration: cfg)
     }()
 
+    private var localSessionFile: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("session.dat")
+    }
+
     override init() {
         super.init()
-        if (Openreplay.shared.options.debugLogs) {
-            if writeToFile, FileManager.default.fileExists(atPath: "/Users/nikitamelnikov/Desktop/session.dat") {
-                try? FileManager.default.removeItem(at: URL(fileURLWithPath: "/Users/nikitamelnikov/Desktop/session.dat"))
-            }
+        if Openreplay.shared.options.debugLogs, writeToFile, let fileURL = localSessionFile {
+            try? FileManager.default.removeItem(at: fileURL)
         }
     }
 
-    private func createRequest(method: String, path: String) -> URLRequest {
-        let url = URL(string: baseUrl+path)!
+    private func createRequest(method: String, path: String) -> URLRequest? {
+        guard let url = URL(string: baseUrl + path) else {
+            DebugUtils.error("Invalid URL: \(baseUrl + path)")
+            return nil
+        }
         var request = URLRequest(url: url)
         request.httpMethod = method
         return request
@@ -41,27 +49,31 @@ class NetworkManager: NSObject {
 
     private func callAPI(request: URLRequest,
                  onSuccess: @escaping (Data) -> Void,
-                 onError: @escaping (Error?) -> Void) {
+                 onError: @escaping (_ error: Error?, _ statusCode: Int?) -> Void) {
         guard !writeToFile else { return }
         let task = session.dataTask(with: request) { (data, response, error) in
             if Openreplay.shared.options.debugLogs {
                 DebugUtils.log(">>> \(request.httpMethod ?? "") \(request.url?.absoluteString ?? "") status=\((response as? HTTPURLResponse)?.statusCode ?? -1)")
             }
-            
+
             DispatchQueue.main.async {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode
                 guard let data = data,
-                      let httpResponse = response as? HTTPURLResponse,
-                      (200...299).contains(httpResponse.statusCode) else {
+                      let statusCode = statusCode,
+                      (200...299).contains(statusCode) else {
                     let failedUrl = request.url?.absoluteString ?? ""
                     let errorStr = error?.localizedDescription ?? "N/A"
                     let respData = String(data: data ?? Data(), encoding: .utf8) ?? ""
                     DebugUtils.error(">>>>>> Error in call \(failedUrl), \n error: \(errorStr) \n response: \(respData)")
-                    
-                    if (response as? HTTPURLResponse)?.statusCode == 401 {
+
+                    if statusCode == 401 {
                         self.token = nil
-                        Openreplay.shared.startSession(projectKey: Openreplay.shared.projectKey ?? "", options: Openreplay.shared.options)
+                        if !self.isRestartingSession {
+                            self.isRestartingSession = true
+                            Openreplay.shared.startSession(projectKey: Openreplay.shared.projectKey ?? "", options: Openreplay.shared.options)
+                        }
                     }
-                    onError(error)
+                    onError(error, statusCode)
                     return
                 }
                 onSuccess(data)
@@ -70,14 +82,32 @@ class NetworkManager: NSObject {
         task.resume()
     }
 
+    /// Transient failures (offline, 5xx, 429) are worth retrying; other 4xx means
+    /// the server rejected the payload/session — retrying the same bytes forever
+    /// just burns battery and bandwidth.
+    func isRetryable(statusCode: Int?) -> Bool {
+        guard let status = statusCode else { return true } // network error, no response
+        return (500...599).contains(status) || status == 429
+    }
+
     func createSession(params: [String: AnyHashable], completion: @escaping (ORSessionResponse?) -> Void) {
         guard !writeToFile else {
             self.token = "writeToFile"
             return
         }
-        var request = createRequest(method: "POST", path: START_URL)
+        // Every terminal path clears the restart latch: if a 401-triggered restart
+        // fails, leaving it set would block all later restarts for the whole
+        // process lifetime.
+        let finish: (ORSessionResponse?) -> Void = { response in
+            self.isRestartingSession = false
+            completion(response)
+        }
+        guard var request = createRequest(method: "POST", path: START_URL) else {
+            finish(nil)
+            return
+        }
         guard let jsonData = try? JSONSerialization.data(withJSONObject: params, options: []) else {
-            completion(nil)
+            finish(nil)
             DebugUtils.error("no params data")
             return
         }
@@ -86,29 +116,39 @@ class NetworkManager: NSObject {
         callAPI(request: request) { (data) in
             do {
                 let session = try JSONDecoder().decode(ORSessionResponse.self, from: data)
-                
+
                 self.token = session.token
                 self.sessionId = session.sessionID
                 self.framesSupport = session.framesSupport ?? false
                 ORUserDefaults.shared.lastToken = self.token
-                completion(session)
+                finish(session)
             } catch {
                 DebugUtils.log("Can't unwrap session start resp: \(error)")
+                finish(nil)
             }
-        } onError: { err in
+        } onError: { err, _ in
             DebugUtils.error(err.debugDescription)
-            completion(nil)
+            finish(nil)
         }
     }
 
-    func sendMessage(content: Data, completion: @escaping (Bool) -> Void) {
+    func sendMessage(content: Data, completion: @escaping (_ success: Bool, _ shouldRetry: Bool) -> Void) {
         guard !writeToFile else {
             appendLocalFile(data: content)
             return
         }
-        var request = createRequest(method: "POST", path: INGEST_URL)
+        guard Openreplay.shared.uploadsAllowed else {
+            // wifiOnly + cellular: keep the batch queued until WiFi returns
+            completion(false, true)
+            return
+        }
+        guard var request = createRequest(method: "POST", path: INGEST_URL) else {
+            completion(false, false)
+            return
+        }
         guard let token = token else {
-            completion(false)
+            // No token yet — keep the batch queued until a session is established.
+            completion(false, true)
             return
         }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -129,15 +169,18 @@ class NetworkManager: NSObject {
 
         request.httpBody = compressedContent
         callAPI(request: request) { (data) in
-            completion(true)
-        } onError: { _ in
-            completion(false)
+            completion(true, false)
+        } onError: { _, statusCode in
+            completion(false, self.isRetryable(statusCode: statusCode))
         }
     }
 
     func sendLateMessage(content: Data, completion: @escaping (Bool) -> Void) {
         DebugUtils.log(">>>sending late messages")
-        var request = createRequest(method: "POST", path: LATE_URL)
+        guard var request = createRequest(method: "POST", path: LATE_URL) else {
+            completion(false)
+            return
+        }
         guard let token = ORUserDefaults.shared.lastToken else {
             completion(false)
             DebugUtils.log("! No last token found")
@@ -148,15 +191,22 @@ class NetworkManager: NSObject {
         callAPI(request: request) { (data) in
             completion(true)
             DebugUtils.log("<<< late messages sent")
-        } onError: { _ in
+        } onError: { _, _ in
             completion(false)
         }
     }
 
-    func sendImages(projectKey: String, images: Data, name: String, completion: @escaping (Bool) -> Void) {
-        var request = createRequest(method: "POST", path: IMAGES_URL)
+    func sendImages(projectKey: String, images: Data, name: String, completion: @escaping (_ success: Bool, _ shouldRetry: Bool) -> Void) {
+        guard Openreplay.shared.uploadsAllowed else {
+            completion(false, true)
+            return
+        }
+        guard var request = createRequest(method: "POST", path: IMAGES_URL) else {
+            completion(false, false)
+            return
+        }
         guard let token = token else {
-            completion(false)
+            completion(false, true)
             return
         }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -187,17 +237,17 @@ class NetworkManager: NSObject {
         request.httpBody = body
 
         callAPI(request: request) { (data) in
-            completion(true)
-        } onError: { _ in
-            completion(false)
+            completion(true, false)
+        } onError: { _, statusCode in
+            completion(false, self.isRetryable(statusCode: statusCode))
         }
     }
 
     private func appendLocalFile(data: Data) {
         if (Openreplay.shared.options.debugLogs) {
             DebugUtils.log("appendInFile \(data.count) bytes")
-            
-            let fileURL = URL(fileURLWithPath: "/Users/nikitamelnikov/Desktop/session.dat")
+
+            guard let fileURL = localSessionFile else { return }
             if let fileHandle = try? FileHandle(forWritingTo: fileURL) {
                 defer {
                     fileHandle.closeFile()

@@ -1,7 +1,6 @@
 import UIKit
 import ObjectiveC
 
-private var viewCounter = 0
 private enum UIViewIdStore {
     static let lock = NSLock()
     static var counter = 0

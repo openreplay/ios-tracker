@@ -60,52 +60,63 @@ class LogsListener {
                 originalStderr = -1
             }
 
-            // Cancel dispatch sources
+            // Cancel dispatch sources. The read ends are closed by each source's
+            // cancel handler, which GCD runs only after any in-flight event handler
+            // has returned — closing them here would race with a handler that is
+            // mid-read() on its own queue (and could hand it a recycled fd).
             stdoutSource?.cancel()
             stdoutSource = nil
+            stdoutPipe[0] = -1
             stderrSource?.cancel()
             stderrSource = nil
-
-            // Close pipe read ends
-            if stdoutPipe[0] >= 0 {
-                close(stdoutPipe[0])
-                stdoutPipe[0] = -1
-            }
-
-            if stderrPipe[0] >= 0 {
-                close(stderrPipe[0])
-                stderrPipe[0] = -1
-            }
+            stderrPipe[0] = -1
         }
     }
 
     private func setupSource(for fd: Int32, severity: String, originalFd: Int32) {
-        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: DispatchQueue.global(qos: .background))
-        source.setEventHandler { [weak self] in
-            guard let strongSelf = self else { return }
+        // Line-buffer per source: fixed-size reads can split a multi-byte UTF-8
+        // character at the chunk boundary, making String(data:) return nil and
+        // silently dropping the whole chunk. Accumulate and emit complete lines.
+        var pending = Data()
+        let maxPendingBytes = 64_000
+        // Own serial queue per source — the captured `pending` buffer must not be
+        // touched concurrently.
+        let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: DispatchQueue(label: "com.openreplay.logs.\(severity)"))
+        source.setEventHandler {
             let bufferSize = 1024
             var buffer = [UInt8](repeating: 0, count: bufferSize)
             let bytesRead = read(fd, &buffer, bufferSize)
-            if bytesRead > 0 {
-                let data = Data(buffer[0..<bytesRead])
+            guard bytesRead > 0 else { return }
+            let data = Data(buffer[0..<bytesRead])
 
-                // Convert data to string and record
-                if let string = String(data: data, encoding: .utf8) {
-                    let message = ORMobileLog(severity: severity, content: string)
-                    MessageCollector.shared.sendMessage(message)
+            // Write back to the original fd first so logs appear normally
+            if originalFd >= 0 {
+                _ = data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Int in
+                    write(originalFd, ptr.baseAddress, ptr.count)
                 }
+            }
 
-                // Also write back to the original fd so logs appear normally
-                if originalFd >= 0 {
-                    _ = data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> Int in
-                        write(originalFd, ptr.baseAddress, ptr.count)
-                    }
+            pending.append(data)
+            while let newlineIndex = pending.firstIndex(of: 0x0A) {
+                let lineData = pending.subdata(in: pending.startIndex..<newlineIndex)
+                pending.removeSubrange(pending.startIndex...newlineIndex)
+                if let line = String(data: lineData, encoding: .utf8), !line.isEmpty {
+                    MessageCollector.shared.sendMessage(ORMobileLog(severity: severity, content: line))
                 }
+            }
+            // A pathological line with no newline shouldn't grow the buffer forever
+            if pending.count > maxPendingBytes {
+                if let chunk = String(data: pending, encoding: .utf8), !chunk.isEmpty {
+                    MessageCollector.shared.sendMessage(ORMobileLog(severity: severity, content: chunk))
+                }
+                pending.removeAll(keepingCapacity: true)
             }
         }
 
         source.setCancelHandler {
-            // We're closing fds in stop().
+            // Owns the read end: GCD guarantees this runs after the last event
+            // handler returns, so nothing can be reading `fd` at this point.
+            close(fd)
         }
 
         source.resume()

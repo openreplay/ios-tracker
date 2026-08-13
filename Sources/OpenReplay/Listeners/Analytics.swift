@@ -6,8 +6,10 @@ import ObjectiveC
 open class Analytics: NSObject {
     public static let shared = Analytics()
     public var enabled = false
-    public var observedInputs: [UITextField] = []
-    public var observedViews: [UIView] = []
+    // Weak registries: strong arrays would keep views alive after their screens
+    // are dismissed (the iOS equivalent of holding detached DOM nodes).
+    private let observedInputs = NSHashTable<UITextField>.weakObjects()
+    private let observedViews = NSHashTable<UIView>.weakObjects()
     private override init() {
         super.init()
     }
@@ -17,27 +19,35 @@ open class Analytics: NSObject {
         UIViewController.swizzleLifecycleMethods()
     }
 
+    /// Full teardown — also forgets every registered view. Only for `Openreplay.stop()`.
     public func stop() {
-        observedViews.removeAll()
-        observedInputs.removeAll()
+        observedViews.removeAllObjects()
+        observedInputs.removeAllObjects()
         enabled = false
     }
 
-    @objc private func handleTap(gesture: UITapGestureRecognizer) {
-        let location = gesture.location(in: nil)
-        DebugUtils.log("Tap detected at: \(location)")
+    /// Backgrounding: stop emitting, but keep the registries. Integrators register
+    /// views once when a screen loads, so clearing here would permanently silence
+    /// every observed view after the first background/foreground cycle. The weak
+    /// table drops dismissed views on its own.
+    func pause() {
+        enabled = false
     }
 
     @objc public func addObservedInput(_ element: UITextField) {
         element.removeTarget(self, action: #selector(textInputFinished), for: .editingDidEnd)
         element.addTarget(self, action: #selector(textInputFinished), for: .editingDidEnd)
-        observedInputs.append(element)
+        observedInputs.add(element)
     }
 
     @objc public func addObservedView(view: UIView, screenName: String, viewName: String) {
         view.orScreenName = screenName
         view.orViewName = viewName
-        observedViews.append(view)
+        observedViews.add(view)
+    }
+
+    func isObserved(_ view: UIView) -> Bool {
+        observedViews.contains(view)
     }
 
     @objc public func sendClick(label: String, x: UInt64, y: UInt64) {
@@ -118,9 +128,9 @@ extension UIViewController {
         var viewsToCheck: [UIView] = [self.view]
         while !viewsToCheck.isEmpty {
             let view = viewsToCheck.removeFirst()
-            if let observed = Analytics.shared.observedViews.first(where: { $0 == view }) {
-                let screenName = observed.orScreenName ?? "Unknown ScreenName"
-                let viewName = observed.orViewName ?? "Unknown View"
+            if Analytics.shared.isObserved(view) {
+                let screenName = view.orScreenName ?? "Unknown ScreenName"
+                let viewName = view.orViewName ?? "Unknown View"
                 return (screenName, viewName)
             }
             viewsToCheck.append(contentsOf: view.subviews)
@@ -344,9 +354,11 @@ public extension View {
 }
 
 extension UIView {
+    // UInt8 keys: taking the address of a static String (as the old code did) is
+    // undefined behavior — Swift may move String storage; only the address matters here.
     private struct AssociatedKeys {
-        static var orScreenName: String = "OR: screenName"
-        static var orViewName: String = "OR: viewName"
+        static var orScreenName: UInt8 = 0
+        static var orViewName: UInt8 = 0
     }
 
     var orScreenName: String? {
