@@ -2,6 +2,13 @@ import UIKit
 
 protocol NSObjectCoding: NSCoding, NSObject {}
 
+/// Decoding failure. Replaces a retroactive `String: Error` conformance,
+/// which Swift warns about because `String` and `Error` are both imported.
+struct ORDataError: Error {
+    let reason: String
+    init(_ reason: String) { self.reason = reason }
+}
+
 extension NSObjectCoding {
     static func from(data: Data, offset: inout Int) throws -> Self {
         let valueData = try data.readData(offset: &offset)
@@ -41,7 +48,7 @@ extension Data {
             return try readBoolean(offset: &offset) as! T
         }
         let valueSize = MemoryLayout<T>.size
-        guard let data = subdata(start: offset, length: valueSize) else { throw "Error reading primary value" }
+        guard let data = subdata(start: offset, length: valueSize) else { throw ORDataError("Error reading primary value") }
         let result = data.withUnsafeBytes {
             $0.load(as: T.self)
         }
@@ -52,7 +59,7 @@ extension Data {
     func readData(offset: inout Int) throws -> Data {
         let length = try readUint(offset: &offset)
         guard let data = subdata(start: offset, length: Int(length)),
-              length == data.count else { throw "Error reading data" }
+              length == data.count else { throw ORDataError("Error reading data") }
 
         offset += Int(length)
         return data
@@ -61,12 +68,12 @@ extension Data {
     func readString(offset: inout Int) throws -> String {
         let data = try readData(offset: &offset)
         guard let result = String(data: data, encoding: .utf8)
-              else { throw "Error reading string" }
+              else { throw ORDataError("Error reading string") }
         return result
     }
 
     private func readByte(offset: inout Int) throws -> UInt8 {
-        guard offset < count else { throw "Error reading byte" }
+        guard offset < count else { throw ORDataError("Error reading byte") }
         let b = self[offset]
         offset += 1
         return b
@@ -80,7 +87,7 @@ extension Data {
             let b = try readByte(offset: &offset)
             if b < 0x80 {
                 if i > 9 || i == 9 && b > 1 {
-                    throw "Invalid UInt"
+                    throw ORDataError("Invalid UInt")
                 }
                 return x | UInt64(b)<<s
             }
@@ -214,4 +221,3 @@ extension Encodable {
     func toJSONData() -> Data? { try? JSONEncoder().encode(self) }
 }
 
-extension String: Error {}
