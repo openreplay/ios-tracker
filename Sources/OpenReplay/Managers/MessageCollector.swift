@@ -32,6 +32,9 @@ class MessageCollector: NSObject {
     }
 
     func start() {
+        // A pass interrupted by suspension can leave this set; clear it so the
+        // re-entrancy guard in terminate() can't strand the next background.
+        workQueue.async { self.sendingLastMessages = false }
         sendInterval?.orInvalidate()
         sendInterval = Timer.orScheduled(interval: 5) { [weak self] _ in
             self?.flush()
@@ -91,12 +94,29 @@ class MessageCollector: NSObject {
 
     func stop() {
         DebugUtils.log("stopping sender")
+        teardownSending()
+        self.terminate()
+    }
+
+    /// Backgrounding entry point. Same teardown as `stop()`, but drains every
+    /// queued batch instead of only the first, and reports back when the drain
+    /// settles so the caller can hold a UIApplication background task open.
+    /// Nothing is discarded: what doesn't get out stays queued for `start()`.
+    func pause(completion: (() -> Void)? = nil) {
+        DebugUtils.log("pausing sender")
+        teardownSending()
+        workQueue.async {
+            self.sendingLastMessages = true
+            self.drainOnQueue(remaining: 20) { completion?() }
+        }
+    }
+
+    private func teardownSending() {
         sendInterval?.orInvalidate(); sendInterval = nil
         NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: UIApplication.willTerminateNotification,  object: nil)
         bufferTimer?.orInvalidate(); bufferTimer = nil
         debounceTimer?.orInvalidate(); debounceTimer = nil
-        self.terminate()
     }
 
     func sendImagesBatch(batch: Data, fileName: String) {
@@ -113,21 +133,62 @@ class MessageCollector: NSObject {
         workQueue.async {
             guard !self.sendingLastMessages else { return }
             self.sendingLastMessages = true
-            self.flushMessagesOnQueue()
-            self.flushImagesOnQueue()
+            self.drainOnQueue(remaining: 20) {}
         }
     }
 
     @objc func flush() {
         workQueue.async {
-            self.flushMessagesOnQueue()
-            self.flushImagesOnQueue()
+            self.drainOnQueue(remaining: 10) {}
         }
     }
 
-    /// Must be called on workQueue.
-    private func flushImagesOnQueue() {
-        guard let images = imagesWaiting.first, let projectKey = Openreplay.shared.projectKey else { return }
+    /// Must be called on workQueue. Sends a message batch and an image batch per
+    /// round, recursing until both queues are empty, a round makes no progress,
+    /// or `remaining` runs out — the cap stops a queue that refills as fast as we
+    /// drain it from spinning here forever.
+    private func drainOnQueue(remaining: Int, completion: @escaping () -> Void) {
+        guard remaining > 0, !messagesWaiting.isEmpty || !imagesWaiting.isEmpty else {
+            completion()
+            return
+        }
+
+        let group = DispatchGroup()
+        var progressed = false
+
+        if !messagesWaiting.isEmpty {
+            group.enter()
+            flushMessagesOnQueue { sent in
+                if sent { progressed = true }
+                group.leave()
+            }
+        }
+        if !imagesWaiting.isEmpty {
+            group.enter()
+            flushImagesOnQueue { sent in
+                if sent { progressed = true }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: workQueue) {
+            // A round that sent nothing means the batch was re-queued or rejected.
+            // Retrying it immediately would just burn the background window.
+            guard progressed else {
+                completion()
+                return
+            }
+            self.drainOnQueue(remaining: remaining - 1, completion: completion)
+        }
+    }
+
+    /// Must be called on workQueue. `completion` reports whether a batch actually
+    /// went out, so `drainOnQueue` knows if another round is worth attempting.
+    private func flushImagesOnQueue(completion: ((Bool) -> Void)? = nil) {
+        guard let images = imagesWaiting.first, let projectKey = Openreplay.shared.projectKey else {
+            completion?(false)
+            return
+        }
         imagesWaiting.removeFirst()
         imagesSending.append(images)
 
@@ -141,8 +202,10 @@ class MessageCollector: NSObject {
                     } else {
                         DebugUtils.error("Dropping image batch \(images.name) after permanent server rejection")
                     }
+                    completion?(false)
                     return
                 }
+                completion?(true)
             }
         }
     }
@@ -217,12 +280,14 @@ class MessageCollector: NSObject {
         return orReplayerMessageTypes.contains(type)
     }
 
-    /// Must be called on workQueue.
-    private func flushMessagesOnQueue() {
+    /// Must be called on workQueue. `completion` reports whether a batch actually
+    /// went out, so `drainOnQueue` knows if another round is worth attempting.
+    private func flushMessagesOnQueue(completion: ((Bool) -> Void)? = nil) {
         guard !self.messagesWaiting.isEmpty else {
             // Nothing left to persist, so a terminate pass over an empty queue is
             // already complete — don't leave the flag latched.
             self.sendingLastMessages = false
+            completion?(false)
             return
         }
 
@@ -235,7 +300,12 @@ class MessageCollector: NSObject {
             sentSize += message.count
         }
 
-        guard !messages.isEmpty else { return }
+        guard !messages.isEmpty else {
+            // Nothing collectable: clear the latch or the next terminate() no-ops.
+            self.sendingLastMessages = false
+            completion?(false)
+            return
+        }
 
         // Group into replay (player, saved to mob file) and analytics (not saved).
         let playerMessages = messages.filter { self.isReplay($0) }
@@ -291,11 +361,20 @@ class MessageCollector: NSObject {
                         // leaving the flag set would make every later batch rewrite
                         // the late-messages file.
                         self.sendingLastMessages = false
+                        completion?(false)
                         return
                     }
                     DebugUtils.log("<><>re-sending failed batch<><>")
                     self.messagesWaiting.insert(contentsOf: messages, at: 0)
                     self.waitingBytes += sentSize
+                    // Backgrounding cancels in-flight requests, and a request with no
+                    // response is retryable — so this is the common path on suspend.
+                    // The batch is safely back in the queue and the pass is over; if
+                    // the latch stayed set, the NEXT terminate() would return at its
+                    // guard and flush nothing, stranding everything buffered during
+                    // the following foreground period.
+                    self.sendingLastMessages = false
+                    completion?(false)
                     return
                 }
                 if self.sendingLastMessages {
@@ -304,6 +383,7 @@ class MessageCollector: NSObject {
                         try? FileManager.default.removeItem(at: fileUrl)
                     }
                 }
+                completion?(true)
             }
         }
     }

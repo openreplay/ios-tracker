@@ -40,7 +40,10 @@ open class ScreenshotManager {
     private var screenshotsBackup: [(Data, UInt64)] = []
     private var tick: UInt64 = 0
     private var bufferTimer: Timer?
-    private var lastTs: UInt64 = 0
+    // Names the upload archive ("<sessionId>-<lastTs>.gz"), so it must advance
+    // monotonically for the whole session. Module-internal so tests can pin the
+    // regression where pause/stop reset it and archives overwrote each other.
+    var lastTs: UInt64 = 0
     private var firstTs: UInt64 = 0
     private var useFramesFormat = false
     // MARK: capture settings
@@ -64,6 +67,8 @@ open class ScreenshotManager {
     /// Restart capture after foregrounding without resetting session timestamps,
     /// capture settings, or the negotiated archive format.
     func resume() {
+        // Anything the last pause could not get out before suspension.
+        sendScreenshots()
         startTakingScreenshots(every: settings.captureRate)
     }
     
@@ -71,16 +76,32 @@ open class ScreenshotManager {
         self.settings = settings
     }
     
+    /// Full teardown for session end. Discards buffers — anything still held
+    /// belongs to a session that is over. Use `pause()` for backgrounding.
     func stop() {
         timer?.orInvalidate()
         timer = nil
         bufferTimer?.orInvalidate()
         bufferTimer = nil
         stateLock.lock()
-        lastTs = 0
         screenshots.removeAll()
         screenshotsBackup.removeAll()
         stateLock.unlock()
+    }
+
+    /// Backgrounding entry point. Stops capture and pushes what is buffered, but
+    /// never discards: whatever misses the background window stays queued and
+    /// goes out on the next `resume()`.
+    ///
+    /// `lastTs` deliberately survives — it names the upload archive
+    /// ("<sessionId>-<lastTs>.gz"), so resetting it made the first batch after
+    /// every resume collide with the session's opening batch and overwrite it.
+    func pause(completion: (() -> Void)? = nil) {
+        timer?.orInvalidate()
+        timer = nil
+        bufferTimer?.orInvalidate()
+        bufferTimer = nil
+        sendScreenshots(completion: completion)
     }
     
     func startTakingScreenshots(every interval: TimeInterval) {
@@ -272,15 +293,17 @@ open class ScreenshotManager {
     }
 
     // MARK: - sending screenshots
-    func sendScreenshots() {
+    func sendScreenshots(completion: (() -> Void)? = nil) {
         guard let sessionId = NetworkManager.shared.sessionId else {
+            completion?()
             return
         }
         if messagesQueue.operationCount > maxPendingBatches {
             DebugUtils.log("Dropping screenshot batch due to backlog")
+            completion?()
             return
         }
-        
+
         stateLock.lock()
         let images = screenshots
         screenshots.removeAll()
@@ -288,10 +311,18 @@ open class ScreenshotManager {
         let lastTsSnapshot = self.lastTs
         let framesFormat = self.useFramesFormat
         stateLock.unlock()
-        
+
+        // An empty batch leaves lastTs unchanged, so it would reuse the previous
+        // archive name and overwrite that upload server-side.
+        guard !images.isEmpty else {
+            completion?()
+            return
+        }
+
         var archiveName = ""
-    
+
         messagesQueue.addOperation {
+            defer { completion?() }
             if self.messagesQueue.operationCount > self.maxPendingBatches {
                 DebugUtils.log("Dropping screenshot batch due to backlog")
                 return
