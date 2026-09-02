@@ -17,7 +17,11 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/devicekit/DeviceKit.git", from: "5.5.0"),
-        .package(url: "https://github.com/tsolomko/SWCompression.git", .upToNextMajor(from: "4.8.5")),
+        // Capped below 4.9.0 on purpose: SWCompression raised its minimum to iOS 17
+        // there, so an open 4.x range makes every consumer targeting iOS 13-16 fail
+        // to resolve. Package.resolved pins 4.8.6 for this repo, but consumers of a
+        // library ignore that file, so the bound has to live here.
+        .package(url: "https://github.com/tsolomko/SWCompression.git", "4.8.5"..<"4.9.0"),
     ],
     targets: [
         .target(
