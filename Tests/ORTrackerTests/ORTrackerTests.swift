@@ -299,6 +299,49 @@ final class SanitizedElementTests: XCTestCase {
 
 // MARK: - stdout/stderr interception lifecycle
 
+final class ScreenshotArchiveNamingTests: XCTestCase {
+    /// Regression guard: upload archives are named "<sessionId>-<lastTs>.gz", so
+    /// lastTs is a per-session monotonic counter. stop() used to reset it to 0,
+    /// which made the first batch after every resume reuse the name of the
+    /// session's opening batch and overwrite it server-side — frames vanished
+    /// around each background/resume, worsening with each extra cycle.
+    func testPauseDoesNotResetArchiveCounter() {
+        let manager = ScreenshotManager.shared
+        let original = manager.lastTs
+        defer { manager.lastTs = original }
+
+        manager.lastTs = 1_700_000_000_123
+        manager.pause()
+        XCTAssertEqual(manager.lastTs, 1_700_000_000_123)
+    }
+
+    func testStopDoesNotResetArchiveCounter() {
+        let manager = ScreenshotManager.shared
+        let original = manager.lastTs
+        defer { manager.lastTs = original }
+
+        manager.lastTs = 1_700_000_000_456
+        manager.stop()
+        XCTAssertEqual(manager.lastTs, 1_700_000_000_456)
+    }
+
+    /// Repeated background cycles are the reported failure mode, so walk more
+    /// than one: the counter must survive every pause/resume pair.
+    func testCounterSurvivesRepeatedBackgroundCycles() {
+        let manager = ScreenshotManager.shared
+        let original = manager.lastTs
+        defer { manager.lastTs = original }
+
+        manager.lastTs = 42
+        for _ in 0..<3 {
+            manager.pause()
+            manager.resume()
+        }
+        manager.stop()
+        XCTAssertEqual(manager.lastTs, 42)
+    }
+}
+
 final class LogsListenerLifecycleTests: XCTestCase {
     /// Regression guard for the fd lifetime: the read ends are closed by each
     /// source's cancel handler, so a start/stop cycle must not double-close (which

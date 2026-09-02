@@ -57,6 +57,9 @@ open class PerformanceListener: NSObject {
             ScreenshotManager.shared.resume()
         }
         MessageCollector.shared.start()
+        // Push whatever the background window could not get out, rather than
+        // waiting up to 5s for the send timer's first tick.
+        MessageCollector.shared.flush()
     }
 
     private func setupTimers() {
@@ -83,16 +86,20 @@ open class PerformanceListener: NSObject {
         }
     }
 
+    /// Reachable from the drain completion (workQueue) and from the expiration
+    /// handler, so hop to main: UIApplication is main-thread-only, and the hop
+    /// also serializes the two callers against double-ending the task.
     private func endBackgroundTask() {
-        if backgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(backgroundTask)
-            backgroundTask = .invalid
+        let end = {
+            if self.backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(self.backgroundTask)
+                self.backgroundTask = .invalid
+            }
         }
+        if Thread.isMainThread { end() } else { DispatchQueue.main.async(execute: end) }
     }
 
     private func pauseOperations(completion: (() -> Void)? = nil) {
-        MessageCollector.shared.stop()
-        ScreenshotManager.shared.stop()
         Crashs.shared.stop()
         Analytics.shared.pause()
         PerformanceListener.shared.stop()
@@ -100,7 +107,17 @@ open class PerformanceListener: NSObject {
             LogsListener.shared.stop()
         }
         wasPaused = true
-        completion?()
+
+        // Screenshots first: packing a batch hands it to the collector, so the
+        // collector's drain below can carry it out in the same background window.
+        // Neither call discards anything — whatever misses the window stays
+        // queued and goes out on resume(). completion() runs only once the drain
+        // settles, keeping the UIApplication background task alive until then.
+        ScreenshotManager.shared.pause {
+            MessageCollector.shared.pause {
+                completion?()
+            }
+        }
     }
 
     func getCpuMessage() {
