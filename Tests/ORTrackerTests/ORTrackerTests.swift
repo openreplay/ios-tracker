@@ -362,3 +362,128 @@ final class LogsListenerLifecycleTests: XCTestCase {
         LogsListener.shared.stop()
     }
 }
+
+// MARK: - Custom URLSession / SSL challenge forwarding
+
+private final class ChallengeSender: NSObject, URLAuthenticationChallengeSender {
+    func use(_ credential: URLCredential, for challenge: URLAuthenticationChallenge) {}
+    func continueWithoutCredential(for challenge: URLAuthenticationChallenge) {}
+    func cancel(_ challenge: URLAuthenticationChallenge) {}
+}
+
+/// Implements the session-level hook only, like an app that passes its existing
+/// `URLSessionDelegate` for pinning.
+private final class SessionLevelDelegate: NSObject, URLSessionDelegate {
+    var challenges = 0
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        challenges += 1
+        completionHandler(.cancelAuthenticationChallenge, nil)
+    }
+}
+
+/// Implements the task-level hook only.
+private final class TaskLevelDelegate: NSObject, URLSessionTaskDelegate {
+    var challenges = 0
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        challenges += 1
+        completionHandler(.rejectProtectionSpace, nil)
+    }
+}
+
+/// Conforms to the task-level protocol but implements neither challenge hook.
+private final class EmptyTaskDelegate: NSObject, URLSessionTaskDelegate {}
+
+final class NetworkManagerSSLTests: XCTestCase {
+    private var savedOptions: OROptions!
+    private let manager = NetworkManager.shared
+
+    override func setUp() {
+        super.setUp()
+        savedOptions = Openreplay.shared.options
+        Openreplay.shared.options = OROptions()
+    }
+
+    override func tearDown() {
+        Openreplay.shared.options = savedOptions
+        super.tearDown()
+    }
+
+    private func makeChallenge() -> URLAuthenticationChallenge {
+        let space = URLProtectionSpace(host: "internal.example.com",
+                                       port: 443,
+                                       protocol: "https",
+                                       realm: nil,
+                                       authenticationMethod: NSURLAuthenticationMethodServerTrust)
+        return URLAuthenticationChallenge(protectionSpace: space,
+                                          proposedCredential: nil,
+                                          previousFailureCount: 0,
+                                          failureResponse: nil,
+                                          error: nil,
+                                          sender: ChallengeSender())
+    }
+
+    /// Never resumed — only needed as an argument to the task-level hook.
+    private func makeTask() -> URLSessionTask {
+        URLSession(configuration: .ephemeral).dataTask(with: URL(string: "https://internal.example.com")!)
+    }
+
+    private func disposition(task: URLSessionTask?) -> URLSession.AuthChallengeDisposition? {
+        var result: URLSession.AuthChallengeDisposition?
+        let session = URLSession(configuration: .ephemeral)
+        if let task = task {
+            manager.urlSession(session, task: task, didReceive: makeChallenge()) { disposition, _ in result = disposition }
+        } else {
+            manager.urlSession(session, didReceive: makeChallenge()) { disposition, _ in result = disposition }
+        }
+        return result
+    }
+
+    func testInjectedSessionReplacesTheSDKSession() {
+        let custom = URLSession(configuration: .default)
+        Openreplay.shared.options.urlSession = custom
+        XCTAssertIdentical(manager.session, custom)
+    }
+
+    func testSDKSessionIsUsedAndStableWithoutInjection() {
+        XCTAssertNotIdentical(manager.session, URLSession.shared)
+        XCTAssertIdentical(manager.session, manager.session, "the SDK session must not be rebuilt per request")
+    }
+
+    func testSessionLevelChallengeReachesTheAppDelegate() {
+        let delegate = SessionLevelDelegate()
+        Openreplay.shared.options.urlSessionDelegate = delegate
+        XCTAssertEqual(disposition(task: nil), .cancelAuthenticationChallenge)
+        XCTAssertEqual(delegate.challenges, 1)
+    }
+
+    func testTaskLevelChallengeReachesTheAppDelegate() {
+        let delegate = TaskLevelDelegate()
+        Openreplay.shared.options.urlSessionDelegate = delegate
+        XCTAssertEqual(disposition(task: makeTask()), .rejectProtectionSpace)
+        XCTAssertEqual(delegate.challenges, 1)
+    }
+
+    func testTaskLevelChallengeFallsBackToSessionLevelDelegate() {
+        let delegate = SessionLevelDelegate()
+        Openreplay.shared.options.urlSessionDelegate = delegate
+        XCTAssertEqual(disposition(task: makeTask()), .cancelAuthenticationChallenge)
+        XCTAssertEqual(delegate.challenges, 1)
+    }
+
+    func testDelegateWithoutChallengeHooksFallsBackToDefaultHandling() {
+        Openreplay.shared.options.urlSessionDelegate = EmptyTaskDelegate()
+        XCTAssertEqual(disposition(task: makeTask()), .performDefaultHandling)
+        XCTAssertEqual(disposition(task: nil), .performDefaultHandling)
+    }
+
+    func testNoDelegateKeepsSystemTrustEvaluation() {
+        XCTAssertNil(Openreplay.shared.options.urlSessionDelegate)
+        XCTAssertEqual(disposition(task: nil), .performDefaultHandling)
+        XCTAssertEqual(disposition(task: makeTask()), .performDefaultHandling)
+    }
+}

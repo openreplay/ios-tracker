@@ -17,13 +17,24 @@ class NetworkManager: NSObject {
     // spawn N parallel session restarts. Reset when a new session is created.
     private var isRestartingSession = false
     
-    private lazy var session: URLSession = {
+    /// Session every SDK request goes through. An integrator-supplied session wins,
+    /// so an app that must own TLS evaluation (internal CA, SSL pinning) can hand
+    /// over the whole session; otherwise the SDK's own session runs and forwards
+    /// auth challenges to `options.urlSessionDelegate`.
+    var session: URLSession {
+        Openreplay.shared.options.urlSession ?? defaultSession
+    }
+
+    // Carries `self` as delegate so SSL challenges reach the app (see the
+    // URLSessionDelegate extension below). The session/delegate retain cycle is
+    // intentional: this is a process-lifetime singleton that is never invalidated.
+    private lazy var defaultSession: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.httpMaximumConnectionsPerHost = 4
         cfg.waitsForConnectivity = true
         cfg.timeoutIntervalForRequest = 30
         cfg.timeoutIntervalForResource = 60
-        return URLSession(configuration: cfg)
+        return URLSession(configuration: cfg, delegate: self, delegateQueue: nil)
     }()
 
     private var localSessionFile: URL? {
@@ -258,5 +269,50 @@ class NetworkManager: NSObject {
                 try? data.write(to: fileURL, options: .atomic)
             }
         }
+    }
+}
+
+// MARK: - Authentication challenges
+
+/// Requests made by the SDK raise their auth challenges here so apps behind an
+/// internal CA (or doing SSL pinning) can evaluate server trust for OpenReplay
+/// traffic exactly as they do for their own. Without `options.urlSessionDelegate`
+/// the system default evaluation runs, which is the pre-existing behaviour.
+extension NetworkManager: URLSessionDelegate, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        forward(challenge: challenge, session: session, task: nil, completionHandler: completionHandler)
+    }
+
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
+                    didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        forward(challenge: challenge, session: session, task: task, completionHandler: completionHandler)
+    }
+
+    /// Both delegate hooks are optional protocol requirements, so calling one
+    /// yields `nil` when the app did not implement it. Task-level first when a
+    /// task is available, then session-level, then system default — a delegate
+    /// that implements either style works.
+    private func forward(challenge: URLAuthenticationChallenge,
+                         session: URLSession,
+                         task: URLSessionTask?,
+                         completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard let delegate = Openreplay.shared.options.urlSessionDelegate else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        if let task = task, let taskDelegate = delegate as? URLSessionTaskDelegate {
+            let handled: Void? = taskDelegate.urlSession?(session, task: task, didReceive: challenge, completionHandler: completionHandler)
+            if handled != nil { return }
+        }
+
+        let handled: Void? = delegate.urlSession?(session, didReceive: challenge, completionHandler: completionHandler)
+        if handled != nil { return }
+
+        completionHandler(.performDefaultHandling, nil)
     }
 }

@@ -23,6 +23,8 @@ import Foundation
 ///   - debugLogs: Enable or disable debug logging.
 ///   - debugImages: Enable or disable capturing debug images.
 ///   - isBlur: Blur sensitive views (when `true`) or cover them with a solid box (when `false`).
+///   - urlSession: Session the SDK sends its own requests through (internal CA / SSL pinning).
+///   - urlSessionDelegate: Receives authentication challenges raised by the SDK's own requests.
 open class OROptions: NSObject {
     /// Enable or disable crash reporting.
     let crashes: Bool
@@ -44,6 +46,20 @@ open class OROptions: NSObject {
     let debugImages: Bool
     /// Blur sensitive views (when `true`) or cover them with a solid box (when `false`).
     let isBlur: Bool
+
+    /// Session the SDK sends its own requests through. Set it when the app has to
+    /// own TLS evaluation — an internal CA (e.g. AD Certificate Services) or SSL
+    /// pinning — and already has a configured `URLSession`. Takes precedence over
+    /// `urlSessionDelegate`.
+    @objc public var urlSession: URLSession?
+
+    /// Receives the authentication challenges (server trust, client certificates)
+    /// raised by the SDK's own requests, so an app behind an internal CA can
+    /// validate them the same way it does for its own traffic. Implement either
+    /// `urlSession(_:didReceive:completionHandler:)` or the task-level variant.
+    /// Ignored when `urlSession` is set, and retained by these options — pass an
+    /// object that outlives the recording, not a temporary.
+    @objc public var urlSessionDelegate: URLSessionDelegate?
 
     /// Default options for release builds.
     public static let defaults = OROptions(crashes: true, analytics: true, performances: true, logs: true, screen: true, screenshotBatchSize: .normal, wifiOnly: true, debugLogs: false, debugImages: false)

@@ -120,7 +120,9 @@ class ConditionsManager: NSObject {
             request.httpMethod = "GET"
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-            let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            // Same session as every other SDK call, so a custom session / SSL
+            // delegate covers the conditions fetch too.
+            let task = NetworkManager.shared.session.dataTask(with: request) { [weak self] data, response, error in
                 guard let self = self, let data = data, error == nil else {
                     DebugUtils.error("Network request to get conditions failed: \(error?.localizedDescription ?? "No error")")
                     return

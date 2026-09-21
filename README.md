@@ -51,6 +51,27 @@ let screen: Bool
 let wifiOnly: Bool
 ```
 
+### Internal CA / SSL pinning
+
+Behind a private CA (e.g. AD Certificate Services), the SDK's own requests fail
+with `-1202` unless the app gets to evaluate server trust for them too. Hand it
+either the delegate that already does that for your own traffic, or a whole
+session:
+
+```swift
+let options = OROptions.defaults
+options.urlSessionDelegate = mySSLDelegate   // forwards auth challenges
+// or hand over the session entirely (wins over urlSessionDelegate):
+options.urlSession = myCustomSession
+
+OpenReplay.shared.start(projectKey: "projectkey", options: options)
+```
+
+The delegate is retained, so pass an object that outlives the recording. It may
+implement `urlSession(_:didReceive:completionHandler:)`, the task-level
+`urlSession(_:task:didReceive:completionHandler:)`, or both. With neither set,
+the system default TLS evaluation runs as before.
+
 Setting up touches listener
 
 ```swift
