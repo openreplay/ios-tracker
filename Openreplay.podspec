@@ -9,6 +9,8 @@ Pod::Spec.new do |s|
   s.ios.deployment_target = '13.0'
   s.swift_version = '5.10'
   s.source_files = 'Sources/OpenReplay/**/*.swift'
-  s.dependency 'SWCompression'
+  # Same cap as Package.swift: SWCompression 4.9.0 raised its minimum to iOS 17,
+  # so an open range breaks every consumer targeting iOS 13-16.
+  s.dependency 'SWCompression', '~> 4.8.5'
   s.dependency 'DeviceKit'
 end
