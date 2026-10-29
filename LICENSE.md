@@ -1,8 +1,4 @@
-Copyright (c) 2026 Asayer, Inc dba OpenReplay
-Reach out (license@openreplay.com) if you have any questions regarding licenses.
-
---------------------------------------------------------------------------------
-                              MIT LICENSE
+Copyright (c) 2026 Asayer, Inc dba OpenReplay. Reach out (license@openreplay.com) if you have any questions regarding licenses.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
